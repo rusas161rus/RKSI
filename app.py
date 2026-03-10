@@ -6,6 +6,7 @@ from threading import Lock, Thread
 
 from dotenv import load_dotenv
 from flask import Flask, flash, jsonify, redirect, render_template, request, session, url_for
+from psycopg2.extras import Json
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash, generate_password_hash
 
@@ -35,10 +36,29 @@ AUTO_SCHEDULER_ENABLED = os.getenv("ENABLE_BACKGROUND_PARSER", "0").strip().lowe
 RKSI_SCHEDULE_URL = "https://www.rksi.ru/schedules"
 RKSI_MOBILE_SCHEDULE_URL = "https://www.rksi.ru/mobileschedule"
 
-PARSER_SYNC_STATE = {"last_run_at": None, "summary": "Парсер ещё не запускался из админки.", "log_lines": [], "failed_groups": [], "is_running": False, "stop_requested": False}
-PLANSHETKA_SYNC_STATE = {"last_run_at": None, "summary": "Парсер Planshetka ещё не запускался.", "log_lines": [], "is_running": False, "failed_files": 0, "scanned_files": 0}
-PARSER_SYNC_LOCK = Lock()
-PLANSHETKA_SYNC_LOCK = Lock()
+RUNTIME_STATE_DEFAULTS = {
+    "parser": {
+        "summary": "Парсер ещё не запускался из админки.",
+        "log_lines": [],
+        "failed_groups": [],
+        "is_running": False,
+        "stop_requested": False,
+        "failed_files": 0,
+        "scanned_files": 0,
+        "last_run_at": None,
+    },
+    "planshetka": {
+        "summary": "Парсер Planshetka ещё не запускался.",
+        "log_lines": [],
+        "failed_groups": [],
+        "is_running": False,
+        "stop_requested": False,
+        "failed_files": 0,
+        "scanned_files": 0,
+        "last_run_at": None,
+    },
+}
+RUNTIME_STATE_LOCKS = {"parser": Lock(), "planshetka": Lock()}
 
 INVALID_TEACHER_NAME_RE = re.compile(r"^[\s_.-]+$")
 
@@ -202,38 +222,239 @@ def deduplicate_storage() -> dict:
     return {"deleted_parser_days_duplicates": 0, "deleted_teachers_duplicates": 0, "deleted_subjects_duplicates": 0}
 
 
+def ensure_runtime_state_table() -> None:
+    with get_main_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS parser_runtime_state (
+                    state_key VARCHAR(32) PRIMARY KEY,
+                    summary TEXT NOT NULL DEFAULT '',
+                    log_lines JSONB NOT NULL DEFAULT '[]'::jsonb,
+                    failed_groups JSONB NOT NULL DEFAULT '[]'::jsonb,
+                    is_running BOOLEAN NOT NULL DEFAULT FALSE,
+                    stop_requested BOOLEAN NOT NULL DEFAULT FALSE,
+                    failed_files INTEGER NOT NULL DEFAULT 0,
+                    scanned_files INTEGER NOT NULL DEFAULT 0,
+                    last_run_at TIMESTAMPTZ,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                )
+                """
+            )
+            for state_key, defaults in RUNTIME_STATE_DEFAULTS.items():
+                cur.execute(
+                    """
+                    INSERT INTO parser_runtime_state(
+                        state_key, summary, log_lines, failed_groups, is_running,
+                        stop_requested, failed_files, scanned_files, last_run_at
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (state_key) DO NOTHING
+                    """,
+                    (
+                        state_key,
+                        defaults["summary"],
+                        Json(defaults["log_lines"]),
+                        Json(defaults["failed_groups"]),
+                        defaults["is_running"],
+                        defaults["stop_requested"],
+                        defaults["failed_files"],
+                        defaults["scanned_files"],
+                        defaults["last_run_at"],
+                    ),
+                )
+
+
+def _normalize_runtime_state_row(row, state_key: str) -> dict:
+    defaults = RUNTIME_STATE_DEFAULTS[state_key]
+    if not row:
+        return {
+            "summary": defaults["summary"],
+            "log_lines": list(defaults["log_lines"]),
+            "failed_groups": list(defaults["failed_groups"]),
+            "is_running": defaults["is_running"],
+            "stop_requested": defaults["stop_requested"],
+            "failed_files": defaults["failed_files"],
+            "scanned_files": defaults["scanned_files"],
+            "last_run_at": defaults["last_run_at"],
+        }
+    return {
+        "summary": row[0] or defaults["summary"],
+        "log_lines": list(row[1] or []),
+        "failed_groups": list(row[2] or []),
+        "is_running": bool(row[3]),
+        "stop_requested": bool(row[4]),
+        "failed_files": int(row[5] or 0),
+        "scanned_files": int(row[6] or 0),
+        "last_run_at": row[7],
+    }
+
+
+def get_runtime_state(state_key: str) -> dict:
+    ensure_runtime_state_table()
+    with get_main_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT summary, log_lines, failed_groups, is_running, stop_requested,
+                       failed_files, scanned_files, last_run_at
+                FROM parser_runtime_state
+                WHERE state_key = %s
+                """,
+                (state_key,),
+            )
+            row = cur.fetchone()
+    return _normalize_runtime_state_row(row, state_key)
+
+
+def update_runtime_state(state_key: str, **updates) -> dict:
+    ensure_runtime_state_table()
+    with RUNTIME_STATE_LOCKS[state_key]:
+        with get_main_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT summary, log_lines, failed_groups, is_running, stop_requested,
+                           failed_files, scanned_files, last_run_at
+                    FROM parser_runtime_state
+                    WHERE state_key = %s
+                    FOR UPDATE
+                    """,
+                    (state_key,),
+                )
+                state = _normalize_runtime_state_row(cur.fetchone(), state_key)
+
+                line = updates.pop("append_line", None)
+                if line is not None:
+                    state["log_lines"].append(str(line))
+                    state["log_lines"] = state["log_lines"][-400:]
+
+                for key, value in updates.items():
+                    if key in state:
+                        state[key] = value
+
+                cur.execute(
+                    """
+                    UPDATE parser_runtime_state
+                    SET summary = %s,
+                        log_lines = %s,
+                        failed_groups = %s,
+                        is_running = %s,
+                        stop_requested = %s,
+                        failed_files = %s,
+                        scanned_files = %s,
+                        last_run_at = %s,
+                        updated_at = now()
+                    WHERE state_key = %s
+                    """,
+                    (
+                        state["summary"],
+                        Json(state["log_lines"]),
+                        Json(state["failed_groups"]),
+                        state["is_running"],
+                        state["stop_requested"],
+                        state["failed_files"],
+                        state["scanned_files"],
+                        state["last_run_at"],
+                        state_key,
+                    ),
+                )
+    return state
+
+
+def try_start_runtime_state(state_key: str, **updates) -> bool:
+    ensure_runtime_state_table()
+    with RUNTIME_STATE_LOCKS[state_key]:
+        with get_main_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT is_running
+                    FROM parser_runtime_state
+                    WHERE state_key = %s
+                    FOR UPDATE
+                    """,
+                    (state_key,),
+                )
+                row = cur.fetchone()
+                if row and row[0]:
+                    return False
+                state = _normalize_runtime_state_row(None, state_key)
+                for key, value in updates.items():
+                    if key in state:
+                        state[key] = value
+                cur.execute(
+                    """
+                    UPDATE parser_runtime_state
+                    SET summary = %s,
+                        log_lines = %s,
+                        failed_groups = %s,
+                        is_running = %s,
+                        stop_requested = %s,
+                        failed_files = %s,
+                        scanned_files = %s,
+                        last_run_at = %s,
+                        updated_at = now()
+                    WHERE state_key = %s
+                    """,
+                    (
+                        state["summary"],
+                        Json(state["log_lines"]),
+                        Json(state["failed_groups"]),
+                        state["is_running"],
+                        state["stop_requested"],
+                        state["failed_files"],
+                        state["scanned_files"],
+                        state["last_run_at"],
+                        state_key,
+                    ),
+                )
+    return True
+
+
 def get_parser_state() -> dict:
-    with PARSER_SYNC_LOCK:
-        return {k: (list(v) if isinstance(v, list) else v) for k, v in PARSER_SYNC_STATE.items()}
+    return get_runtime_state("parser")
 
 
 def set_parser_state(**updates) -> None:
-    with PARSER_SYNC_LOCK:
-        line = updates.pop("append_line", None)
-        if line:
-            PARSER_SYNC_STATE["log_lines"].append(str(line))
-            PARSER_SYNC_STATE["log_lines"] = PARSER_SYNC_STATE["log_lines"][-400:]
-        PARSER_SYNC_STATE.update({k: v for k, v in updates.items() if k in PARSER_SYNC_STATE})
+    update_runtime_state("parser", **updates)
 
 
 def get_planshetka_state() -> dict:
-    with PLANSHETKA_SYNC_LOCK:
-        return {k: (list(v) if isinstance(v, list) else v) for k, v in PLANSHETKA_SYNC_STATE.items()}
+    return get_runtime_state("planshetka")
 
 
 def set_planshetka_state(**updates) -> None:
-    with PLANSHETKA_SYNC_LOCK:
-        line = updates.pop("append_line", None)
-        if line:
-            PLANSHETKA_SYNC_STATE["log_lines"].append(str(line))
-            PLANSHETKA_SYNC_STATE["log_lines"] = PLANSHETKA_SYNC_STATE["log_lines"][-400:]
-        PLANSHETKA_SYNC_STATE.update({k: v for k, v in updates.items() if k in PLANSHETKA_SYNC_STATE})
+    update_runtime_state("planshetka", **updates)
+
+
+def reset_runtime_state_flags() -> None:
+    ensure_runtime_state_table()
+    with get_main_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE parser_runtime_state
+                SET is_running = FALSE,
+                    stop_requested = FALSE,
+                    updated_at = now()
+                WHERE is_running = TRUE OR stop_requested = TRUE
+                """
+            )
 
 def start_parser_job(group_names: list[str], mode_label: str) -> bool:
-    with PARSER_SYNC_LOCK:
-        if PARSER_SYNC_STATE["is_running"]:
-            return False
-        PARSER_SYNC_STATE.update({"is_running": True, "stop_requested": False, "failed_groups": [], "summary": f"Запущен: {mode_label}", "log_lines": [f"[START] {mode_label}"]})
+    if not try_start_runtime_state(
+        "parser",
+        is_running=True,
+        stop_requested=False,
+        failed_groups=[],
+        failed_files=0,
+        scanned_files=0,
+        summary=f"Запущен: {mode_label}",
+        log_lines=[f"[START] {mode_label}"],
+        last_run_at=None,
+    ):
+        return False
 
     def worker():
         failed, done = [], 0
@@ -258,10 +479,18 @@ def start_parser_job(group_names: list[str], mode_label: str) -> bool:
 
 
 def start_planshetka_job(folder_url: str, recent_files_limit: int, mode_label: str) -> bool:
-    with PLANSHETKA_SYNC_LOCK:
-        if PLANSHETKA_SYNC_STATE["is_running"]:
-            return False
-        PLANSHETKA_SYNC_STATE.update({"is_running": True, "summary": f"Запущен: {mode_label}", "log_lines": [f"[START] {mode_label}"], "failed_files": 0, "scanned_files": 0})
+    if not try_start_runtime_state(
+        "planshetka",
+        is_running=True,
+        stop_requested=False,
+        failed_groups=[],
+        failed_files=0,
+        scanned_files=0,
+        summary=f"Запущен: {mode_label}",
+        log_lines=[f"[START] {mode_label}"],
+        last_run_at=None,
+    ):
+        return False
 
     def worker():
         def log(message: str):
@@ -896,6 +1125,8 @@ def admin_planshetka_status():
 
 ensure_auto_schedule_table()
 ensure_planshetka_tables()
+ensure_runtime_state_table()
+reset_runtime_state_flags()
 
 
 if __name__ == "__main__":
