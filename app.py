@@ -374,6 +374,8 @@ def me():
     if request.method == "POST":
         action = request.form.get("profile_action") or "apply"
         preferred_group_id = (request.form.get("preferred_group_id") or "").strip() or None
+        if action == "reset_search":
+            preferred_group_id = None
         with get_main_conn() as conn:
             with conn.cursor() as cur:
                 cur.execute("UPDATE site_users SET preferred_group_id = %s, updated_at = now() WHERE id = %s", (preferred_group_id, user["id"]))
