@@ -105,8 +105,9 @@
           {% if day.rows %}
             {% for row in day.rows %}
             <article class="lesson-block">
+              {% set hide_generic_planshetka_title = row[7] == 'planshetka' and row[4] and (row[4][:5]|lower) == 'пара ' %}
               <p class="lesson-time">{% if row[2] and row[3] %}{{ row[2] }} — {{ row[3] }}{% else %}без времени{% endif %}</p>
-              <h4>{{ row[4] }}</h4>
+              {% if not hide_generic_planshetka_title %}<h4>{{ row[4] }}</h4>{% endif %}
               <p class="lesson-detail">{{ row[5] or "" }}{% if row[6] %}, ауд. {{ row[6] }}{% endif %}</p>
               {% if all_groups %}<p class="lesson-detail">Группа: {{ row[9] }}</p>{% endif %}
               <small class="source">Источник: {{ "сайт РКСИ" if row[7] == "rksi" else ("Planshetka" if row[7] == "planshetka" else "ручное расписание") }}</small>
