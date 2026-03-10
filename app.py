@@ -442,6 +442,29 @@ def reset_runtime_state_flags() -> None:
                 """
             )
 
+
+def repair_runtime_state_encoding() -> None:
+    ensure_runtime_state_table()
+    with get_main_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT state_key, summary FROM parser_runtime_state")
+            for state_key, summary in cur.fetchall():
+                default_summary = RUNTIME_STATE_DEFAULTS.get(state_key, {}).get("summary")
+                if not default_summary:
+                    continue
+                cleaned_summary = (summary or "").strip()
+                # Heal rows that were previously written with broken console encoding.
+                if not cleaned_summary or "???" in cleaned_summary:
+                    cur.execute(
+                        """
+                        UPDATE parser_runtime_state
+                        SET summary = %s,
+                            updated_at = now()
+                        WHERE state_key = %s
+                        """,
+                        (default_summary, state_key),
+                    )
+
 def start_parser_job(group_names: list[str], mode_label: str) -> bool:
     if not try_start_runtime_state(
         "parser",
@@ -1126,6 +1149,7 @@ def admin_planshetka_status():
 ensure_auto_schedule_table()
 ensure_planshetka_tables()
 ensure_runtime_state_table()
+repair_runtime_state_encoding()
 reset_runtime_state_flags()
 
 
