@@ -105,9 +105,8 @@
           {% if day.rows %}
             {% for row in day.rows %}
             <article class="lesson-block">
-              {% set same_planshetka_slot_as_previous = loop.previtem and row[7] == 'planshetka' and loop.previtem[7] == 'planshetka' and row[2] == loop.previtem[2] and row[3] == loop.previtem[3] and row[4] == loop.previtem[4] %}
               {% if row[7] != 'planshetka' %}<p class="lesson-time">{% if row[2] and row[3] %}{{ row[2] }} — {{ row[3] }}{% else %}без времени{% endif %}</p>{% endif %}
-              {% if not same_planshetka_slot_as_previous %}<h4>{{ row[4] }}</h4>{% endif %}
+              <h4>{{ row[4] }}</h4>
               <p class="lesson-detail">{{ row[5] or "" }}{% if row[6] %}, ауд. {{ row[6] }}{% endif %}</p>
               {% if all_groups %}<p class="lesson-detail">Группа: {{ row[9] }}</p>{% endif %}
               <small class="source">Источник: {{ "сайт РКСИ" if row[7] == "rksi" else ("Planshetka" if row[7] == "planshetka" else "ручное расписание") }}</small>
