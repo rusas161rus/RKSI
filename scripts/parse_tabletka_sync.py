@@ -31,7 +31,7 @@ DRIVE_XLSX_ENTRY_RE = re.compile(
 DRIVE_FOLDER_ENTRY_RE = re.compile(
     r'\[\[null,"(?P<id>[a-zA-Z0-9_-]{20,})"\],null,null,null,"application/vnd\.google-apps\.folder"'
 )
-FILE_NAME_DATE_RE = re.compile(r"(\d{2}\.\d{2}\.\d{2,4})")
+FILE_NAME_DATE_RE = re.compile(r"(\d{2}\.\d{2}(?:\.\d{2,4})?)")
 DEFAULT_RECENT_FILES_LIMIT = 2
 INVALID_TEACHER_NAME_RE = re.compile(r"^[\s_.-]+$")
 
@@ -285,7 +285,29 @@ def parse_file_date_from_name(file_name: str) -> Optional[date]:
     match = FILE_NAME_DATE_RE.search(normalize_line(file_name))
     if not match:
         return None
-    return parse_sheet_date(match.group(1))
+    raw_date = match.group(1)
+    parsed = parse_sheet_date(raw_date)
+    if parsed is not None:
+        return parsed
+    try:
+        partial = datetime.strptime(raw_date, "%d.%m")
+        return date(datetime.now().year, partial.month, partial.day)
+    except ValueError:
+        return None
+
+
+def file_name_date_precision(file_name: str) -> int:
+    match = FILE_NAME_DATE_RE.search(normalize_line(file_name))
+    if not match:
+        return -1
+    token = match.group(1)
+    if re.fullmatch(r"\d{2}\.\d{2}\.\d{4}", token):
+        return 2
+    if re.fullmatch(r"\d{2}\.\d{2}\.\d{2}", token):
+        return 1
+    if re.fullmatch(r"\d{2}\.\d{2}", token):
+        return 0
+    return -1
 
 
 def extract_drive_folder_items(page_html: str) -> tuple[list[DriveFileEntry], set[str]]:
@@ -350,7 +372,32 @@ def select_recent_files(file_entries: list[DriveFileEntry], keep_latest: int = D
             sortable.append((parsed_date, entry.file_name, entry.file_id, entry))
 
     sortable.sort(reverse=True)
-    selected = [entry for _, _, _, entry in sortable[:keep_latest]]
+    best_by_date: dict[date, DriveFileEntry] = {}
+    for parsed_date, _, _, entry in sortable:
+        current = best_by_date.get(parsed_date)
+        if current is None:
+            best_by_date[parsed_date] = entry
+            continue
+
+        candidate_key = (
+            file_name_date_precision(entry.file_name),
+            len(entry.file_name),
+            entry.file_name,
+            entry.file_id,
+        )
+        current_key = (
+            file_name_date_precision(current.file_name),
+            len(current.file_name),
+            current.file_name,
+            current.file_id,
+        )
+        if candidate_key > current_key:
+            best_by_date[parsed_date] = entry
+
+    selected: list[DriveFileEntry] = []
+    for parsed_date in sorted(best_by_date.keys(), reverse=True)[:keep_latest]:
+        selected.append(best_by_date[parsed_date])
+
     target_count = min(keep_latest, len(file_entries))
     if len(selected) < target_count:
         undated.sort(key=lambda item: (item.file_name, item.file_id), reverse=True)
@@ -414,6 +461,15 @@ def parse_xlsx_lessons(content: bytes, source_doc_url: str, log: LogFn = None) -
             room2 = normalize_line(sheet.cell(row=row, column=4).value)
             group2 = normalize_line(sheet.cell(row=row, column=5).value)
             teacher2 = normalize_line(sheet.cell(row=row, column=6).value)
+
+            # Some Planshetka exports use an alternate 10-column layout:
+            # A/D = rooms, G/H = first group/teacher, I/J = second group/teacher.
+            if not group1 and not teacher1 and sheet.max_column >= 8:
+                group1 = normalize_line(sheet.cell(row=row, column=7).value)
+                teacher1 = normalize_line(sheet.cell(row=row, column=8).value)
+            if not group2 and not teacher2 and sheet.max_column >= 10:
+                group2 = normalize_line(sheet.cell(row=row, column=9).value)
+                teacher2 = normalize_line(sheet.cell(row=row, column=10).value)
 
             normalized_group1 = extract_group_name(group1)
             normalized_group2 = extract_group_name(group2)
