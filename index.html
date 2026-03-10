@@ -1,0 +1,74 @@
+﻿<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Расписание занятий</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <main class="page">
+    <header class="hero">
+      <p class="hero__tag">Тестовый проект</p>
+      <h1>Расписание занятий</h1>
+      <p class="hero__subtitle">Актуальные занятия на неделю с быстрым фильтром по дню.</p>
+    </header>
+
+    <section class="controls" aria-label="Фильтр по дням">
+      <button class="day-btn is-active" data-day="all">Все</button>
+      <button class="day-btn" data-day="monday">Пн</button>
+      <button class="day-btn" data-day="tuesday">Вт</button>
+      <button class="day-btn" data-day="wednesday">Ср</button>
+      <button class="day-btn" data-day="thursday">Чт</button>
+      <button class="day-btn" data-day="friday">Пт</button>
+      <button class="day-btn" data-day="saturday">Сб</button>
+    </section>
+
+    <section class="editor">
+      <h2 class="editor__title">Добавить занятие</h2>
+      <form id="lesson-form" class="editor__form">
+        <label>
+          День
+          <select name="day" required>
+            <option value="monday">Понедельник</option>
+            <option value="tuesday">Вторник</option>
+            <option value="wednesday">Среда</option>
+            <option value="thursday">Четверг</option>
+            <option value="friday">Пятница</option>
+            <option value="saturday">Суббота</option>
+          </select>
+        </label>
+
+        <label>
+          Время
+          <input type="text" name="time" placeholder="Например: 14:00-15:30" required />
+        </label>
+
+        <label>
+          Предмет
+          <input type="text" name="subject" placeholder="Например: Химия" required />
+        </label>
+
+        <label>
+          Преподаватель
+          <input type="text" name="teacher" placeholder="Например: Орлова Л.А." required />
+        </label>
+
+        <label>
+          Аудитория
+          <input type="text" name="room" placeholder="Например: Ауд. 210" required />
+        </label>
+
+        <button type="submit" class="add-btn">Добавить в расписание</button>
+      </form>
+    </section>
+
+    <section id="schedule" class="schedule" aria-live="polite"></section>
+  </main>
+
+  <script src="script.js"></script>
+</body>
+</html>

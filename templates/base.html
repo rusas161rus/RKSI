@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{ title }} | Расписание занятий РКСИ</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+<body>
+  <main class="container">
+    <header class="site-header">
+      <h1>Расписание занятий РКСИ</h1>
+      {% if session.get('user_id') %}
+      <nav class="top-nav">
+        <button type="button" id="themeToggle" class="theme-toggle">Тема: светлая</button>
+        <a href="{{ url_for('me') }}" class="nav-link {% if request.endpoint == 'me' %}active{% endif %}">Личный кабинет</a>
+        {% if session.get('is_admin') %}<a href="{{ url_for('admin_dashboard') }}" class="nav-link {% if request.endpoint == 'admin_dashboard' %}active{% endif %}">Админ-панель</a>{% endif %}
+        <a href="{{ url_for('logout') }}" class="nav-link">Выйти</a>
+      </nav>
+      {% endif %}
+    </header>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <section class="alerts">
+          {% for category, msg in messages %}
+            <div class="alert alert-{{ category }}">{{ msg }}</div>
+          {% endfor %}
+        </section>
+      {% endif %}
+    {% endwith %}
+
+    {% block content %}{% endblock %}
+  </main>
+
+  <section id="cookieBanner" class="cookie-banner" hidden aria-live="polite" aria-label="Согласие на cookies">
+    <div class="cookie-banner__card">
+      <div>
+        <h2>Сбор cookies и данных браузера</h2>
+        <p>Сайт использует технические cookies, localStorage, sessionStorage и кэш браузера для входа в систему, сохранения темы и удобства работы с расписанием.</p>
+        <p><a href="{{ url_for('cookie_policy') }}">Открыть соглашение</a></p>
+      </div>
+      <div class="cookie-banner__actions">
+        <button type="button" id="cookieAccept">Принять</button>
+      </div>
+    </div>
+  </section>
+
+  <script>
+    (function () {
+      var root = document.documentElement;
+      var toggle = document.getElementById('themeToggle');
+      var banner = document.getElementById('cookieBanner');
+      var acceptBtn = document.getElementById('cookieAccept');
+      var consentCookie = 'cookie_consent=accepted';
+      var themeKey = 'site-theme';
+      var scrollKey = 'restore-scroll-y';
+      var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+      var consentGiven = document.cookie.split(';').some(function (item) {
+        return item.trim() === consentCookie;
+      });
+      var theme = prefersDark ? 'dark' : 'light';
+      var storageEnabled = false;
+
+      function applyTheme(nextTheme) {
+        root.setAttribute('data-theme', nextTheme);
+        if (toggle) {
+          toggle.textContent = nextTheme === 'dark' ? 'Тема: тёмная' : 'Тема: светлая';
+        }
+      }
+
+      function bindScrollRestore() {
+        if (!storageEnabled) return;
+
+        var savedScroll = sessionStorage.getItem(scrollKey);
+        if (savedScroll !== null) {
+          sessionStorage.removeItem(scrollKey);
+          window.requestAnimationFrame(function () {
+            window.scrollTo({ top: parseInt(savedScroll, 10) || 0, behavior: 'auto' });
+          });
+        }
+
+        document.querySelectorAll('form[method="post"], form[data-preserve-scroll="1"]').forEach(function (form) {
+          if (form.dataset.scrollBound === '1') return;
+          form.dataset.scrollBound = '1';
+          form.addEventListener('submit', function () {
+            sessionStorage.setItem(scrollKey, String(window.scrollY || window.pageYOffset || 0));
+          });
+        });
+      }
+
+      function enableEnhancedStorage() {
+        if (storageEnabled) {
+          bindScrollRestore();
+          return;
+        }
+
+        storageEnabled = true;
+        var savedTheme = localStorage.getItem(themeKey);
+        theme = savedTheme || theme;
+        applyTheme(theme);
+        bindScrollRestore();
+      }
+
+      applyTheme(theme);
+
+      if (toggle) {
+        toggle.addEventListener('click', function () {
+          theme = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+          applyTheme(theme);
+          if (storageEnabled) {
+            localStorage.setItem(themeKey, theme);
+          }
+        });
+      }
+
+      if (consentGiven) {
+        enableEnhancedStorage();
+      } else if (banner) {
+        banner.hidden = false;
+      }
+
+      if (acceptBtn) {
+        acceptBtn.addEventListener('click', function () {
+          consentGiven = true;
+          document.cookie = consentCookie + '; path=/; max-age=' + (60 * 60 * 24 * 365) + '; SameSite=Lax';
+          if (banner) {
+            banner.hidden = true;
+          }
+          enableEnhancedStorage();
+          localStorage.setItem(themeKey, root.getAttribute('data-theme') || theme);
+        });
+      }
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,130 @@
+﻿{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <h2>Личный кабинет</h2>
+  <p><strong>Пользователь:</strong> {{ user.full_name or user.username }}</p>
+
+  <form method="post" class="grid-form top-controls-form">
+    <input type="hidden" name="date" value="{{ selected_date }}" />
+    <input type="hidden" name="period" value="{{ selected_period }}" />
+    <input type="hidden" name="q" value="{{ search_query }}" />
+    <input type="hidden" name="source" value="{{ source_mode }}" />
+
+    <label>Моя учебная группа
+      <select name="preferred_group_id">
+        <option value="">Выберите группу</option>
+        {% for g in groups %}
+        <option value="{{ g[0] }}" {% if user.preferred_group_id == g[0] %}selected{% endif %}>{{ g[1] }}</option>
+        {% endfor %}
+      </select>
+    </label>
+
+    <label>Преподаватель
+      <select name="teacher_id">
+        <option value="">Все преподаватели</option>
+        {% for t in teachers %}
+        <option value="{{ t[0] }}" {% if selected_teacher_id and selected_teacher_id|int == t[0] %}selected{% endif %}>{{ t[1] }}</option>
+        {% endfor %}
+      </select>
+    </label>
+
+    <label class="inline-check"><input type="checkbox" name="all_groups" value="1" {% if all_groups %}checked{% endif %} /> Искать по всем группам</label>
+
+    <button type="submit" name="profile_action" value="apply">Применить</button>
+    <button type="submit" name="profile_action" value="reset_search" class="danger">Сбросить поиск</button>
+  </form>
+</section>
+
+<section class="card">
+  <div class="action-row schedule-links" style="margin-bottom: 0.8rem;">
+    <form method="get" action="{{ planshetka_folder_url }}" target="_blank" rel="noopener noreferrer" class="grid-form compact-form">
+      <button type="submit" {% if not planshetka_folder_url %}disabled{% endif %}>Открыть папку Planshetka</button>
+    </form>
+    <form method="get" action="{{ rksi_schedule_url }}" target="_blank" rel="noopener noreferrer" class="grid-form compact-form">
+      <button type="submit">Открыть расписание РКСИ</button>
+    </form>
+    <form method="get" action="{{ rksi_mobile_schedule_url }}" target="_blank" rel="noopener noreferrer" class="grid-form compact-form">
+      <button type="submit">Открыть мобильную версию</button>
+    </form>
+  </div>
+
+  <h2>Расписание</h2>
+  <p class="meta">Переключить источник:</p>
+  <div class="action-row source-switch" style="margin-bottom: 0.8rem;">
+    <form method="get" data-preserve-scroll="1">
+      <input type="hidden" name="date" value="{{ selected_date }}" />
+      <input type="hidden" name="period" value="{{ selected_period }}" />
+      <input type="hidden" name="q" value="{{ search_query }}" />
+      <input type="hidden" name="teacher_id" value="{{ selected_teacher_id }}" />
+      <input type="hidden" name="all_groups" value="{{ 1 if all_groups else 0 }}" />
+      <button type="submit" name="source" value="rksi" class="{% if source_mode == 'rksi' %}is-active{% endif %}">Расписание с сайта РКСИ</button>
+    </form>
+    <form method="get" data-preserve-scroll="1">
+      <input type="hidden" name="date" value="{{ selected_date }}" />
+      <input type="hidden" name="period" value="{{ selected_period }}" />
+      <input type="hidden" name="q" value="{{ search_query }}" />
+      <input type="hidden" name="teacher_id" value="{{ selected_teacher_id }}" />
+      <input type="hidden" name="all_groups" value="{{ 1 if all_groups else 0 }}" />
+      <button type="submit" name="source" value="planshetka" class="{% if source_mode == 'planshetka' %}is-active{% endif %}">Расписание из Planshetka</button>
+    </form>
+  </div>
+
+  <form method="get" class="grid-form schedule-filters">
+    <label>Дата
+      <input type="date" name="date" value="{{ selected_date }}" />
+    </label>
+    <label>Период
+      <select name="period">
+        {% for code, title in period_options.items() %}
+        <option value="{{ code }}" {% if selected_period == code %}selected{% endif %}>{{ title }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Поиск (предмет/ауд.)
+      <input type="text" name="q" value="{{ search_query }}" placeholder="Например: информатика" />
+    </label>
+    <input type="hidden" name="teacher_id" value="{{ selected_teacher_id }}" />
+    <input type="hidden" name="all_groups" value="{{ 1 if all_groups else 0 }}" />
+    <input type="hidden" name="source" value="{{ source_mode }}" />
+    <button type="submit">Показать</button>
+  </form>
+
+  {% if group_name and not all_groups %}
+    <p class="meta">Группа: {{ group_name }}</p>
+  {% elif all_groups %}
+    <p class="meta">Группа: все группы</p>
+  {% endif %}
+
+  {% if show_schedule %}
+    {% if schedule_days %}
+      <div class="schedule-columns">
+        {% for day in schedule_days %}
+        <section class="day-column">
+          <h3>{{ day.header }}</h3>
+
+          {% if day.rows %}
+            {% for row in day.rows %}
+            <article class="lesson-block">
+              <p class="lesson-time">{% if row[2] and row[3] %}{{ row[2] }} — {{ row[3] }}{% else %}без времени{% endif %}</p>
+              <h4>{{ row[4] }}</h4>
+              <p class="lesson-detail">{{ row[5] or "" }}{% if row[6] %}, ауд. {{ row[6] }}{% endif %}</p>
+              {% if all_groups %}<p class="lesson-detail">Группа: {{ row[9] }}</p>{% endif %}
+              <small class="source">Источник: {{ "сайт РКСИ" if row[7] == "rksi" else ("Planshetka" if row[7] == "planshetka" else "ручное расписание") }}</small>
+            </article>
+            {% endfor %}
+          {% else %}
+            <p class="meta">Занятий нет</p>
+          {% endif %}
+        </section>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p>На выбранный период занятий нет.</p>
+    {% endif %}
+  {% else %}
+    <p>Выберите группу в личном кабинете или укажите преподавателя, чтобы увидеть расписание.</p>
+  {% endif %}
+</section>
+{% endblock %}
+
+
