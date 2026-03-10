@@ -378,7 +378,14 @@ def me():
             with conn.cursor() as cur:
                 cur.execute("UPDATE site_users SET preferred_group_id = %s, updated_at = now() WHERE id = %s", (preferred_group_id, user["id"]))
         if action == "reset_search":
-            return redirect(url_for("me", date=request.form.get("date"), period=request.form.get("period"), source=request.form.get("source") or "rksi"))
+            return redirect(
+                url_for(
+                    "me",
+                    date=request.form.get("date"),
+                    period=request.form.get("period"),
+                    source=request.form.get("source") or "rksi",
+                )
+            )
         return redirect(url_for("me", date=request.form.get("date"), period=request.form.get("period"), q=request.form.get("q"), source=request.form.get("source") or "rksi", teacher_id=request.form.get("teacher_id"), all_groups=1 if request.form.get("all_groups") == "1" else 0))
 
     selected_date = request.args.get("date")
@@ -457,7 +464,10 @@ def me():
                     sql += " AND group_id = %s"
                     params.append(user["preferred_group_id"])
                 if teacher_filter_name:
-                    sql += " AND COALESCE(teacher_name, '') = %s"
+                    if source_mode == "rksi":
+                        sql += " AND COALESCE(t.full_name, '') = %s"
+                    else:
+                        sql += " AND COALESCE(x.teacher_name, '') = %s"
                     params.append(teacher_filter_name)
                 if keyword:
                     sql += " AND (subject_name ILIKE %s OR COALESCE(room, '') ILIKE %s)"
