@@ -1,36 +1,38 @@
-﻿{% extends "base.html" %}
+{% extends "base.html" %}
 {% block content %}
-<section class="card narrow">
-  <h2>Вход</h2>
-  <form method="post" class="grid-form">
-    <input type="hidden" name="action" value="login" />
-    <label>Логин
-      <input type="text" name="username" required />
-    </label>
-    <label>Пароль
-      <input type="password" name="password" required />
-    </label>
-    <button type="submit">Войти</button>
-  </form>
-</section>
+<div class="auth-shell">
+  <section class="card narrow">
+    <h2>Вход</h2>
+    <form method="post" class="grid-form">
+      <input type="hidden" name="action" value="login" />
+      <label>Логин
+        <input type="text" name="username" required />
+      </label>
+      <label>Пароль
+        <input type="password" name="password" required />
+      </label>
+      <button type="submit">Войти</button>
+    </form>
+  </section>
 
-<section class="card narrow">
-  <h2>Регистрация</h2>
-  <form method="post" class="grid-form">
-    <input type="hidden" name="action" value="register" />
-    <label>Логин
-      <input type="text" name="username" minlength="3" required />
-    </label>
-    <label>ФИО (необязательно)
-      <input type="text" name="full_name" />
-    </label>
-    <label>Пароль
-      <input type="password" name="password" minlength="6" required />
-    </label>
-    <label>Повторите пароль
-      <input type="password" name="password_confirm" minlength="6" required />
-    </label>
-    <button type="submit">Зарегистрироваться</button>
-  </form>
-</section>
+  <section class="card narrow">
+    <h2>Регистрация</h2>
+    <form method="post" class="grid-form">
+      <input type="hidden" name="action" value="register" />
+      <label>Логин
+        <input type="text" name="username" minlength="3" required />
+      </label>
+      <label>ФИО (необязательно)
+        <input type="text" name="full_name" />
+      </label>
+      <label>Пароль
+        <input type="password" name="password" minlength="6" required />
+      </label>
+      <label>Повторите пароль
+        <input type="password" name="password_confirm" minlength="6" required />
+      </label>
+      <button type="submit">Зарегистрироваться</button>
+    </form>
+  </section>
+</div>
 {% endblock %}

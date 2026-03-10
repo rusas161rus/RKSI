@@ -125,6 +125,20 @@ body {
 
 .narrow { max-width: 420px; }
 
+.auth-shell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  max-width: 860px;
+  margin: 0 auto;
+}
+
+.auth-shell .card {
+  margin-left: auto;
+  margin-right: auto;
+}
+
 .grid-form {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
