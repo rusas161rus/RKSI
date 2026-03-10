@@ -12,7 +12,7 @@ from urllib.parse import parse_qs, urlparse
 import requests
 from openpyxl import load_workbook
 
-from db import ensure_schedule_room_columns, get_main_conn
+from db import ensure_schedule_room_columns, get_main_conn, is_composite_teacher_name
 
 LogFn = Optional[Callable[[str], None]]
 
@@ -104,6 +104,13 @@ def normalize_teacher_name(name: str | None) -> Optional[str]:
     return cleaned
 
 
+def canonical_teacher_name(name: str | None) -> Optional[str]:
+    cleaned = normalize_teacher_name(name)
+    if cleaned and is_composite_teacher_name(cleaned):
+        return None
+    return cleaned
+
+
 def extract_drive_id(url_or_id: str) -> str:
     raw = (url_or_id or "").strip()
     if not raw:
@@ -183,6 +190,7 @@ def ensure_planshetka_tables() -> None:
                   teacher_id BIGINT REFERENCES teachers(id) ON DELETE SET NULL,
                   group_id BIGINT NOT NULL REFERENCES study_groups(id) ON DELETE CASCADE,
                   room VARCHAR(32),
+                  raw_teacher_name TEXT,
                   source_hash VARCHAR(64) NOT NULL UNIQUE,
                   source_group_name VARCHAR(64) NOT NULL,
                   source_doc_url TEXT,
@@ -204,6 +212,12 @@ def ensure_planshetka_tables() -> None:
                 """
                 ALTER TABLE parsed_tabletka_schedule_entries
                 ADD COLUMN IF NOT EXISTS room VARCHAR(32)
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE parsed_tabletka_schedule_entries
+                ADD COLUMN IF NOT EXISTS raw_teacher_name TEXT
                 """
             )
 
@@ -476,7 +490,7 @@ def build_hash(lesson: PlanshetkaLesson) -> str:
 
 
 def upsert_teacher(cur, teacher_name: Optional[str], room: Optional[str]) -> Optional[int]:
-    teacher_name = normalize_teacher_name(teacher_name)
+    teacher_name = canonical_teacher_name(teacher_name)
     if not teacher_name:
         return None
 
@@ -539,14 +553,15 @@ def store_lessons(lessons: list[PlanshetkaLesson], replace_group: bool = True, l
                     subject_id = cur.fetchone()[0]
 
                     teacher_id = upsert_teacher(cur, lesson.teacher_name, lesson.room)
+                    raw_teacher_name = normalize_teacher_name(lesson.teacher_name)
 
                     source_hash = build_hash(lesson)
                     cur.execute(
                         """
                         INSERT INTO parsed_tabletka_schedule_entries(
                           lesson_date, start_time, end_time, subject_id, teacher_id,
-                          group_id, room, source_hash, source_group_name, source_doc_url
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                          group_id, room, raw_teacher_name, source_hash, source_group_name, source_doc_url
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         ON CONFLICT (source_hash) DO NOTHING
                         RETURNING id
                         """,
@@ -558,6 +573,7 @@ def store_lessons(lessons: list[PlanshetkaLesson], replace_group: bool = True, l
                             teacher_id,
                             group_id,
                             lesson.room,
+                            raw_teacher_name,
                             source_hash,
                             group_name,
                             lesson.source_doc_url,

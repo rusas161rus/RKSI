@@ -16,7 +16,7 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from db import ensure_schedule_room_columns, get_main_conn
+from db import ensure_schedule_room_columns, get_main_conn, is_composite_teacher_name
 
 SOURCE_URL = "https://www.rksi.ru/mobileschedule"
 GROUPS_URL = f"{SOURCE_URL}/groups"
@@ -73,6 +73,13 @@ def normalize_teacher_name(name: str | None) -> Optional[str]:
     if not cleaned:
         return None
     if INVALID_TEACHER_NAME_RE.fullmatch(cleaned):
+        return None
+    return cleaned
+
+
+def canonical_teacher_name(name: str | None) -> Optional[str]:
+    cleaned = normalize_teacher_name(name)
+    if cleaned and is_composite_teacher_name(cleaned):
         return None
     return cleaned
 
@@ -365,7 +372,8 @@ def sync_from_parser_to_main(group_name: str, replace_group: bool = False) -> in
                 subject_id = cur.fetchone()[0]
 
                 teacher_id = None
-                teacher_name = normalize_teacher_name(teacher_name)
+                raw_teacher_name = normalize_teacher_name(teacher_name)
+                teacher_name = canonical_teacher_name(teacher_name)
                 if teacher_name:
                     cur.execute(
                         """
@@ -395,12 +403,12 @@ def sync_from_parser_to_main(group_name: str, replace_group: bool = False) -> in
                 cur.execute(
                     """
                     INSERT INTO parsed_schedule_entries(
-                      lesson_date, start_time, end_time, subject_id, teacher_id, group_id, room, source_hash, source_group_name
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                      lesson_date, start_time, end_time, subject_id, teacher_id, group_id, room, raw_teacher_name, source_hash, source_group_name
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (source_hash) DO NOTHING
                     RETURNING id
                     """,
-                    (lesson_date, start_time, end_time, subject_id, teacher_id, group_id, room, source_hash, norm_group),
+                    (lesson_date, start_time, end_time, subject_id, teacher_id, group_id, room, raw_teacher_name, source_hash, norm_group),
                 )
                 created = cur.fetchone()
                 if created:

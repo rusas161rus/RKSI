@@ -65,6 +65,7 @@ CREATE TABLE IF NOT EXISTS parsed_schedule_entries (
   subject_id BIGINT NOT NULL REFERENCES subjects(id) ON DELETE RESTRICT,
   teacher_id BIGINT REFERENCES teachers(id) ON DELETE SET NULL,
   room VARCHAR(32),
+  raw_teacher_name TEXT,
   group_id BIGINT NOT NULL REFERENCES study_groups(id) ON DELETE CASCADE,
   source_hash VARCHAR(64) NOT NULL UNIQUE,
   source_group_name VARCHAR(64) NOT NULL,
@@ -118,7 +119,7 @@ SELECT
   p.end_time,
   g.group_name,
   subj.subject_name,
-  t.full_name AS teacher_name,
+  COALESCE(t.full_name, p.raw_teacher_name) AS teacher_name,
   COALESCE(p.room, t.room) AS room,
   'parsed'::text AS source
 FROM parsed_schedule_entries p

@@ -9,7 +9,7 @@ from flask import Flask, flash, jsonify, redirect, render_template, request, ses
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from db import ensure_schedule_room_columns, get_main_conn
+from db import ensure_schedule_room_columns, get_main_conn, is_composite_teacher_name
 from scripts.parse_and_sync import fetch_group_map, run as run_parser_group
 from scripts.parse_tabletka_sync import (
     clear_planshetka_data,
@@ -48,6 +48,8 @@ def normalize_teacher_name(raw_name: str | None) -> str | None:
     if not normalized:
         return None
     if INVALID_TEACHER_NAME_RE.fullmatch(normalized):
+        return None
+    if is_composite_teacher_name(normalized):
         return None
     return normalized
 
@@ -420,7 +422,7 @@ def me():
                 GROUP BY full_name
                 ORDER BY full_name
             """)
-            teachers = cur.fetchall()
+            teachers = [row for row in cur.fetchall() if not is_composite_teacher_name(row[1])]
             teacher_filter_name = None
             if teacher_filter_id is not None:
                 cur.execute("SELECT full_name FROM teachers WHERE id = %s", (teacher_filter_id,))
@@ -438,7 +440,7 @@ def me():
                 if source_mode == "rksi":
                     sql = """
                         SELECT p.id, p.lesson_date, p.start_time, p.end_time,
-                               subj.subject_name, t.full_name AS teacher_name, COALESCE(p.room, t.room) AS room,
+                               subj.subject_name, COALESCE(t.full_name, p.raw_teacher_name, '') AS teacher_name, COALESCE(p.room, t.room) AS room,
                                'rksi' AS source, p.teacher_id, g.group_name, p.group_id
                         FROM parsed_schedule_entries p
                         JOIN subjects subj ON subj.id = p.subject_id
@@ -451,12 +453,12 @@ def me():
                         SELECT x.id, x.lesson_date, x.start_time, x.end_time, x.subject_name, x.teacher_name, x.room, x.source, x.teacher_id, x.group_name, x.group_id
                         FROM (
                           SELECT s.id, s.lesson_date, s.start_time, s.end_time, subj.subject_name,
-                                 t.full_name AS teacher_name, COALESCE(s.room, t.room) AS room, 'manual' AS source,
+                                 COALESCE(t.full_name, '') AS teacher_name, COALESCE(s.room, t.room) AS room, 'manual' AS source,
                                  s.teacher_id, g.group_name, s.group_id
                           FROM schedule_entries s JOIN subjects subj ON subj.id = s.subject_id LEFT JOIN teachers t ON t.id = s.teacher_id JOIN study_groups g ON g.id = s.group_id
                           UNION ALL
                           SELECT p.id, p.lesson_date, p.start_time, p.end_time, subj.subject_name,
-                                 t.full_name AS teacher_name, COALESCE(p.room, t.room) AS room, 'planshetka' AS source,
+                                 COALESCE(t.full_name, p.raw_teacher_name, '') AS teacher_name, COALESCE(p.room, t.room) AS room, 'planshetka' AS source,
                                  p.teacher_id, g.group_name, p.group_id
                           FROM parsed_tabletka_schedule_entries p JOIN subjects subj ON subj.id = p.subject_id LEFT JOIN teachers t ON t.id = p.teacher_id JOIN study_groups g ON g.id = p.group_id
                         ) x WHERE x.lesson_date BETWEEN %s AND %s
@@ -786,17 +788,17 @@ def admin_dashboard():
             cur.execute("SELECT id, subject_name FROM subjects ORDER BY subject_name")
             subjects = cur.fetchall()
             cur.execute("SELECT id, full_name, COALESCE(room, '') FROM teachers ORDER BY full_name")
-            teachers = cur.fetchall()
+            teachers = [row for row in cur.fetchall() if not is_composite_teacher_name(row[1])]
             cur.execute("""
                 SELECT x.id, x.lesson_date, x.start_time, x.end_time, x.subject_name, x.teacher_name, x.group_name, x.source
                 FROM (
                   SELECT s.id, s.lesson_date, s.start_time, s.end_time, subj.subject_name, COALESCE(t.full_name, '') AS teacher_name, g.group_name, 'manual' AS source
                   FROM schedule_entries s JOIN subjects subj ON subj.id = s.subject_id LEFT JOIN teachers t ON t.id = s.teacher_id JOIN study_groups g ON g.id = s.group_id
                   UNION ALL
-                  SELECT p.id, p.lesson_date, p.start_time, p.end_time, subj.subject_name, COALESCE(t.full_name, '') AS teacher_name, g.group_name, 'parsed' AS source
+                  SELECT p.id, p.lesson_date, p.start_time, p.end_time, subj.subject_name, COALESCE(t.full_name, p.raw_teacher_name, '') AS teacher_name, g.group_name, 'parsed' AS source
                   FROM parsed_schedule_entries p JOIN subjects subj ON subj.id = p.subject_id LEFT JOIN teachers t ON t.id = p.teacher_id JOIN study_groups g ON g.id = p.group_id
                   UNION ALL
-                  SELECT pt.id, pt.lesson_date, pt.start_time, pt.end_time, subj.subject_name, COALESCE(t.full_name, '') AS teacher_name, g.group_name, 'planshetka' AS source
+                  SELECT pt.id, pt.lesson_date, pt.start_time, pt.end_time, subj.subject_name, COALESCE(t.full_name, pt.raw_teacher_name, '') AS teacher_name, g.group_name, 'planshetka' AS source
                   FROM parsed_tabletka_schedule_entries pt JOIN subjects subj ON subj.id = pt.subject_id LEFT JOIN teachers t ON t.id = pt.teacher_id JOIN study_groups g ON g.id = pt.group_id
                 ) x ORDER BY x.lesson_date DESC, x.start_time NULLS LAST LIMIT 200
             """)

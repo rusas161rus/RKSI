@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS parsed_tabletka_schedule_entries (
   teacher_id BIGINT REFERENCES teachers(id) ON DELETE SET NULL,
   group_id BIGINT NOT NULL REFERENCES study_groups(id) ON DELETE CASCADE,
   room VARCHAR(32),
+  raw_teacher_name TEXT,
   source_hash VARCHAR(64) NOT NULL UNIQUE,
   source_group_name VARCHAR(64) NOT NULL,
   source_doc_url TEXT,
