@@ -1,4 +1,4 @@
-import os
+﻿import os
 import re
 from contextlib import contextmanager
 
@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-MULTI_TEACHER_TOKEN_RE = re.compile(r"\b[А-ЯЁ][а-яё-]+(?:\s+[А-Я]\.\s*[А-Я]\.?)")
+MULTI_TEACHER_TOKEN_RE = re.compile(r"\b[А-ЯЁ][а-яё-]+(?:\s+[А-ЯЁ]\.\s*[А-ЯЁ]\.?)")
 
 
 def build_dsn(prefix: str = "DB") -> str:
@@ -49,6 +49,20 @@ def get_bot_conn():
     except RuntimeError:
         with get_db_conn("DB") as conn:
             yield conn
+
+
+@contextmanager
+def get_llm_conn():
+    try:
+        with get_db_conn("LLM_DB") as conn:
+            yield conn
+    except RuntimeError:
+        try:
+            with get_db_conn("BOT_DB") as conn:
+                yield conn
+        except RuntimeError:
+            with get_db_conn("DB") as conn:
+                yield conn
 
 
 def is_composite_teacher_name(name: str | None) -> bool:
@@ -129,3 +143,4 @@ def ensure_schedule_room_columns() -> None:
                     """,
                     (composite_teacher_ids,),
                 )
+

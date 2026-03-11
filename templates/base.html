@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>{{ title }} | Расписание занятий РКСИ</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css', v='20260311-04') }}" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css', v='20260311-05') }}" />
 </head>
 <body>
   <main class="container">
@@ -14,6 +14,7 @@
       <nav class="top-nav">
         <button type="button" id="themeToggle" class="theme-toggle">Тема: светлая</button>
         <a href="{{ url_for('me') }}" class="nav-link {% if request.endpoint == 'me' %}active{% endif %}">Личный кабинет</a>
+        <a href="{{ url_for('ai_assistant_page') }}" class="nav-link {% if request.endpoint == 'ai_assistant_page' %}active{% endif %}">ИИ</a>
         <a href="{{ url_for('me_layout_settings') }}" class="nav-link {% if request.endpoint == 'me_layout_settings' %}active{% endif %}">Настройка кабинета</a>
         {% if session.get('is_admin') %}<a href="{{ url_for('admin_dashboard') }}" class="nav-link {% if request.endpoint == 'admin_dashboard' %}active{% endif %}">Админ-панель</a>{% endif %}
         <a href="{{ url_for('logout') }}" class="nav-link">Выйти</a>

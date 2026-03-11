@@ -11,6 +11,20 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from db import ensure_schedule_room_columns, get_main_conn, is_composite_teacher_name
+from llm_assistant import (
+    build_default_schedule_context,
+    build_ollama_messages,
+    call_ollama_chat,
+    ensure_llm_tables,
+    extract_note_payload,
+    extract_search_query,
+    fetch_chat_messages,
+    fetch_schedule_context,
+    get_ai_user_settings,
+    get_or_create_chat_session,
+    save_chat_message,
+    update_ai_user_settings,
+)
 from personalization import (
     build_today_summary,
     create_announcement,
@@ -174,6 +188,14 @@ def should_start_background_threads() -> bool:
     if debug_mode and os.getenv("WERKZEUG_RUN_MAIN") != "true":
         return False
     return True
+
+
+def ensure_llm_ready() -> tuple[bool, str]:
+    try:
+        ensure_llm_tables()
+        return True, ""
+    except Exception as exc:
+        return False, str(exc)
 
 
 def login_required(view):
@@ -691,6 +713,117 @@ def me_layout_settings():
         dashboard_widgets=DASHBOARD_WIDGETS,
         user_id=session["user_id"],
     )
+
+
+@app.route("/ai")
+@login_required
+def ai_assistant_page():
+    user = load_user(session["user_id"])
+    if not user:
+        session.clear()
+        return redirect(url_for("login"))
+
+    llm_ready, llm_error = ensure_llm_ready()
+    ai_messages = []
+    ai_settings = {"allow_note_creation": False}
+    if llm_ready:
+        chat_session_id = get_or_create_chat_session(user["id"])
+        ai_messages = fetch_chat_messages(chat_session_id, limit=80)
+        ai_settings = get_ai_user_settings(user["id"])
+    else:
+        flash("Сервис ИИ временно недоступен. Проверьте подключение к LLM_DB.", "error")
+
+    return render_template(
+        "ai_chat.html",
+        title="ИИ",
+        user=user,
+        ai_messages=ai_messages,
+        ai_settings=ai_settings,
+        llm_ready=llm_ready,
+        llm_error=llm_error,
+        ollama_model=(os.getenv("OLLAMA_MODEL") or "qwen2.5:7b-instruct").strip(),
+    )
+
+
+@app.route("/api/ai/settings", methods=["POST"])
+@login_required
+def api_ai_settings():
+    llm_ready, llm_error = ensure_llm_ready()
+    if not llm_ready:
+        return jsonify({"ok": False, "error": f"LLM storage unavailable: {llm_error}"}), 503
+    payload = request.get_json(silent=True) or {}
+    raw_value = payload.get("allow_note_creation")
+    allow_note_creation = str(raw_value).strip().lower() in {"1", "true", "yes", "on"}
+    if isinstance(raw_value, bool):
+        allow_note_creation = raw_value
+    settings = update_ai_user_settings(session["user_id"], allow_note_creation)
+    return jsonify({"ok": True, "settings": settings})
+
+
+@app.route("/api/ai/chat", methods=["POST"])
+@login_required
+def api_ai_chat():
+    llm_ready, llm_error = ensure_llm_ready()
+    if not llm_ready:
+        return jsonify({"ok": False, "error": f"LLM storage unavailable: {llm_error}"}), 503
+    payload = request.get_json(silent=True) or {}
+    message_text = (payload.get("message") or "").strip()
+    if not message_text:
+        return jsonify({"ok": False, "error": "Введите сообщение для ИИ."}), 400
+
+    user_id = int(session["user_id"])
+    chat_session_id = get_or_create_chat_session(user_id)
+    save_chat_message(chat_session_id, "user", message_text)
+    ai_settings = get_ai_user_settings(user_id)
+
+    note_payload = extract_note_payload(message_text)
+    if note_payload is not None:
+        if not ai_settings.get("allow_note_creation"):
+            reply = "Создание заметок выключено. Включите разрешение на этой странице и повторите запрос."
+            save_chat_message(chat_session_id, "assistant", reply, {"note_created": False, "note_denied": True})
+            return jsonify({"ok": True, "reply": reply, "meta": {"note_created": False, "note_denied": True}})
+        if not note_payload.get("title"):
+            reply = "Не удалось распознать заголовок. Используйте формат: /note Заголовок | Текст | YYYY-MM-DD"
+            save_chat_message(chat_session_id, "assistant", reply, {"note_created": False, "note_error": "title_missing"})
+            return jsonify({"ok": True, "reply": reply, "meta": {"note_created": False, "note_error": "title_missing"}})
+        try:
+            create_user_note(user_id, note_payload.get("title", ""), note_payload.get("note_text", ""), note_payload.get("due_date", ""))
+            due_date = note_payload.get("due_date", "")
+            reply = f"Готово. Заметка «{note_payload['title']}» добавлена в личный кабинет."
+            if due_date:
+                reply += f" Срок: {due_date}."
+            save_chat_message(chat_session_id, "assistant", reply, {"note_created": True, "note_payload": note_payload})
+            return jsonify({"ok": True, "reply": reply, "meta": {"note_created": True, "note_payload": note_payload}})
+        except Exception as exc:
+            reply = f"Не удалось создать заметку: {exc}"
+            save_chat_message(chat_session_id, "assistant", reply, {"note_created": False, "note_error": "create_failed"})
+            return jsonify({"ok": True, "reply": reply, "meta": {"note_created": False, "note_error": "create_failed"}})
+
+    search_query = extract_search_query(message_text)
+    schedule_context = build_default_schedule_context(user_id)
+    search_context = None
+    if search_query:
+        today = date.today()
+        search_context = fetch_schedule_context(user_id, today - timedelta(days=7), today + timedelta(days=45), limit=120, keyword=search_query)
+
+    recent_messages = fetch_chat_messages(chat_session_id, limit=25)
+    ollama_messages = build_ollama_messages(
+        message_text,
+        recent_messages,
+        schedule_context=schedule_context,
+        search_context=search_context,
+        can_create_note=bool(ai_settings.get("allow_note_creation")),
+    )
+
+    try:
+        reply = call_ollama_chat(ollama_messages)
+        meta = {"search_query": search_query or "", "model": (os.getenv("OLLAMA_MODEL") or "").strip()}
+    except Exception as exc:
+        reply = f"Не удалось получить ответ от модели. Проверьте OLLAMA_URL/OLLAMA_MODEL и доступность сервера. Детали: {exc}"
+        meta = {"search_query": search_query or "", "model_error": str(exc)}
+
+    save_chat_message(chat_session_id, "assistant", reply, meta)
+    return jsonify({"ok": True, "reply": reply, "meta": meta})
 
 
 @app.route("/me", methods=["GET", "POST"])
@@ -1378,6 +1511,9 @@ ensure_planshetka_tables()
 ensure_runtime_state_table()
 ensure_personalization_tables()
 ensure_bot_tables()
+llm_ok, llm_err = ensure_llm_ready()
+if not llm_ok:
+    print(f"[WARN] AI storage init failed: {llm_err}")
 repair_runtime_state_encoding()
 reset_runtime_state_flags()
 detect_and_record_schedule_changes()

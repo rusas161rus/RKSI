@@ -1,0 +1,156 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card ai-shell">
+  <div class="ai-shell__head">
+    <h2>ИИ</h2>
+    <p class="meta">Модель: {{ ollama_model }}</p>
+  </div>
+  <p class="meta">Ассистент может смотреть расписание вашей группы, выполнять поиск по расписанию и по команде создавать заметки в ЛК.</p>
+  <p class="meta">Формат заметки: <code>/note Заголовок | Текст | YYYY-MM-DD</code></p>
+  {% if not llm_ready %}
+  <p class="alert alert-error">Сервис ИИ временно недоступен: {{ llm_error }}</p>
+  {% endif %}
+
+  <form id="aiSettingsForm" class="grid-form ai-settings-form">
+    <label class="inline-check">
+      <input type="checkbox" id="allowNoteCreation" {% if ai_settings.allow_note_creation %}checked{% endif %} {% if not llm_ready %}disabled{% endif %} />
+      Разрешить ИИ создавать заметки в личном кабинете
+    </label>
+  </form>
+
+  <p id="aiStatus" class="meta"></p>
+
+  <div id="aiChatLog" class="ai-chat-log" aria-live="polite">
+    {% if ai_messages %}
+      {% for item in ai_messages %}
+      <article class="ai-message ai-message--{{ 'user' if item.role == 'user' else 'assistant' }}">
+        <h4>{{ "Вы" if item.role == "user" else "ИИ" }}</h4>
+        <p>{{ item.content }}</p>
+      </article>
+      {% endfor %}
+    {% else %}
+      <article class="ai-message ai-message--assistant">
+        <h4>ИИ</h4>
+        <p>Чат готов. Напишите вопрос по расписанию, например: "Найди занятия по математике на этой неделе".</p>
+      </article>
+    {% endif %}
+  </div>
+
+  <form id="aiChatForm" class="grid-form ai-chat-form">
+    <label class="ai-chat-form__full">Сообщение
+      <textarea id="aiMessageInput" rows="4" placeholder="Например: Найди в расписании пары в ауд. 303"></textarea>
+    </label>
+    <button type="submit" id="aiSendBtn" {% if not llm_ready %}disabled{% endif %}>Отправить</button>
+  </form>
+</section>
+
+<script>
+  (function () {
+    var llmReady = {{ llm_ready | tojson }};
+    var settingsForm = document.getElementById('aiSettingsForm');
+    var allowNoteCreation = document.getElementById('allowNoteCreation');
+    var chatForm = document.getElementById('aiChatForm');
+    var chatLog = document.getElementById('aiChatLog');
+    var messageInput = document.getElementById('aiMessageInput');
+    var sendButton = document.getElementById('aiSendBtn');
+    var statusNode = document.getElementById('aiStatus');
+
+    if (!chatForm || !chatLog || !messageInput || !sendButton) {
+      return;
+    }
+
+    function setStatus(text) {
+      if (!statusNode) return;
+      statusNode.textContent = text || '';
+    }
+
+    function appendMessage(role, text) {
+      var card = document.createElement('article');
+      card.className = 'ai-message ai-message--' + (role === 'user' ? 'user' : 'assistant');
+      var head = document.createElement('h4');
+      head.textContent = role === 'user' ? 'Вы' : 'ИИ';
+      var body = document.createElement('p');
+      body.textContent = text;
+      card.appendChild(head);
+      card.appendChild(body);
+      chatLog.appendChild(card);
+      chatLog.scrollTop = chatLog.scrollHeight;
+    }
+
+    function setPending(isPending) {
+      sendButton.disabled = isPending;
+      messageInput.disabled = isPending;
+      sendButton.textContent = isPending ? 'Отправка...' : 'Отправить';
+    }
+
+    if (!llmReady) {
+      messageInput.disabled = true;
+      setStatus('Сервис ИИ временно недоступен.');
+      chatLog.scrollTop = chatLog.scrollHeight;
+      return;
+    }
+
+    if (settingsForm && allowNoteCreation) {
+      allowNoteCreation.addEventListener('change', function () {
+        setStatus('Сохраняю настройку...');
+        fetch('{{ url_for("api_ai_settings") }}', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ allow_note_creation: allowNoteCreation.checked })
+        })
+          .then(function (response) { return response.json(); })
+          .then(function (payload) {
+            if (payload && payload.ok) {
+              setStatus('Настройка сохранена.');
+            } else {
+              setStatus('Не удалось сохранить настройку.');
+            }
+          })
+          .catch(function () {
+            setStatus('Ошибка сети при сохранении настройки.');
+          });
+      });
+    }
+
+    chatForm.addEventListener('submit', function (event) {
+      event.preventDefault();
+      var text = (messageInput.value || '').trim();
+      if (!text) {
+        setStatus('Введите сообщение.');
+        return;
+      }
+
+      appendMessage('user', text);
+      messageInput.value = '';
+      setPending(true);
+      setStatus('ИИ думает...');
+
+      fetch('{{ url_for("api_ai_chat") }}', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: text })
+      })
+        .then(function (response) { return response.json(); })
+        .then(function (payload) {
+          if (payload && payload.ok) {
+            appendMessage('assistant', payload.reply || 'Пустой ответ.');
+            setStatus('');
+          } else {
+            appendMessage('assistant', (payload && payload.error) ? payload.error : 'Не удалось обработать запрос.');
+            setStatus('Ошибка запроса.');
+          }
+        })
+        .catch(function () {
+          appendMessage('assistant', 'Ошибка сети. Проверьте подключение и повторите запрос.');
+          setStatus('Ошибка сети.');
+        })
+        .finally(function () {
+          setPending(false);
+          messageInput.focus();
+        });
+    });
+
+    chatLog.scrollTop = chatLog.scrollHeight;
+  })();
+</script>
+{% endblock %}

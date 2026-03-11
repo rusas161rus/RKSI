@@ -9,6 +9,7 @@
 - добавлен `Dockerfile` и `docker-compose.yml`;
 - добавлен Linux bootstrap-скрипт `scripts/bootstrap_linux.sh`;
 - обновлён `.env.example` под Linux/production.
+- добавлена страница `ИИ` с чатом через Ollama и отдельной БД истории/настроек.
 
 ## Быстрый деплой на сервер Ubuntu
 
@@ -38,6 +39,8 @@ nano .env
 Обязательно заполнить:
 - `FLASK_SECRET_KEY` (длинный случайный ключ)
 - `DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASSWORD`
+- `LLM_DB_HOST/LLM_DB_PORT/LLM_DB_NAME/LLM_DB_USER/LLM_DB_PASSWORD`
+- `OLLAMA_URL` и `OLLAMA_MODEL`
 
 4. Поднять контейнер:
 
@@ -81,6 +84,13 @@ psql -h <DB_HOST> -p <DB_PORT> -U <DB_USER> -d <DB_NAME> -f sql/004_personalizat
 ```bash
 export PGPASSWORD='<BOT_DB_PASSWORD>'
 psql -h <BOT_DB_HOST> -p <BOT_DB_PORT> -U <BOT_DB_USER> -d <BOT_DB_NAME> -f sql/005_bot_schema.sql
+```
+
+Для отдельной БД ИИ-чата:
+
+```bash
+export PGPASSWORD='<LLM_DB_PASSWORD>'
+psql -h <LLM_DB_HOST> -p <LLM_DB_PORT> -U <LLM_DB_USER> -d <LLM_DB_NAME> -f sql/006_llm_schema.sql
 ```
 
 Создать первого админа:
