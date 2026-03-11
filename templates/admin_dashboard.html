@@ -2,7 +2,7 @@
 {% block content %}
 <section class="card" id="section-admin-top">
   <h2>Админ-панель</h2>
-  <p>Управление пользователями, расписанием, справочниками, источниками парсинга и ручными изменениями.</p>
+  <p>Управление расписанием, справочниками, источниками парсинга и ручными изменениями. Пользователи вынесены в отдельную вкладку.</p>
 </section>
 
 <section class="card">
@@ -195,117 +195,6 @@
   {% else %}
     <p class="meta">Объявлений пока нет.</p>
   {% endif %}
-</section>
-
-
-<section class="card">
-  <h3>Создание пользователя/админа</h3>
-  <form method="post" class="grid-form compact-form">
-    <input type="hidden" name="section" value="overview" />
-    <input type="hidden" name="action" value="create_user" />
-    <label>Логин
-      <input type="text" name="username" required />
-    </label>
-    <label>ФИО
-      <input type="text" name="full_name" />
-    </label>
-    <label>Пароль
-      <input type="text" name="password" required />
-    </label>
-    <label>Группа
-      <select name="preferred_group_id">
-        <option value="">Не выбрана</option>
-        {% for g in groups %}
-        <option value="{{ g[0] }}">{{ g[1] }}</option>
-        {% endfor %}
-      </select>
-    </label>
-    <label class="inline-check"><input type="checkbox" name="is_admin" /> Выдать права админа</label>
-    <input type="hidden" name="users_role" value="{{ users_role }}" />
-    <input type="hidden" name="users_group_id" value="{{ users_group_id_filter }}" />
-    <button type="submit">Создать пользователя</button>
-  </form>
-</section>
-
-<section class="card">
-  <h3>Пользователи</h3>
-
-  <form method="get" class="grid-form users-filter-form">
-    <input type="hidden" name="section" value="overview" />
-    <label>Фильтр по роли
-      <select name="users_role">
-        <option value="all" {% if users_role == 'all' %}selected{% endif %}>Все роли</option>
-        <option value="user" {% if users_role == 'user' %}selected{% endif %}>Только пользователи</option>
-        <option value="admin" {% if users_role == 'admin' %}selected{% endif %}>Только админы</option>
-      </select>
-    </label>
-    <label>Фильтр по группе
-      <select name="users_group_id">
-        <option value="all" {% if users_group_id_filter == 'all' %}selected{% endif %}>Все группы</option>
-        <option value="none" {% if users_group_id_filter == 'none' %}selected{% endif %}>Без группы</option>
-        {% for g in groups %}
-        <option value="{{ g[0] }}" {% if users_group_id_filter == (g[0]|string) %}selected{% endif %}>{{ g[1] }}</option>
-        {% endfor %}
-      </select>
-    </label>
-    <button type="submit">Применить</button>
-  </form>
-
-  <form method="post" id="bulkDeleteUsersForm" class="bulk-delete-form" onsubmit="return confirm('Удалить выбранных пользователей?');">
-    <input type="hidden" name="section" value="overview" />
-    <input type="hidden" name="action" value="delete_users_bulk" />
-    <input type="hidden" name="users_role" value="{{ users_role }}" />
-    <input type="hidden" name="users_group_id" value="{{ users_group_id_filter }}" />
-    <button type="submit" class="danger">Удалить выбранных</button>
-  </form>
-
-  <table class="dictionary-table users-table" id="usersTable">
-    <thead>
-      <tr>
-        <th class="checkbox-col"><input type="checkbox" data-bulk-toggle="user" aria-label="Выбрать всех пользователей" /></th>
-        <th><button type="button" class="users-group-toggle" data-group-field="id">ID</button></th>
-        <th><button type="button" class="users-group-toggle" data-group-field="login">Логин</button></th>
-        <th><button type="button" class="users-group-toggle" data-group-field="full_name">ФИО</button></th>
-        <th><button type="button" class="users-group-toggle" data-group-field="group">Группа</button></th>
-        <th><button type="button" class="users-group-toggle" data-group-field="role">Роль</button></th>
-        <th>Действия</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for u in users %}
-        {% set role_code = 'admin' if u[4] else 'user' %}
-        {% set role_text = 'админ' if u[4] else 'пользователь' %}
-        {% set group_text = u[3] if u[3] else 'Без группы' %}
-        <tr data-user-row="1" data-id="{{ u[0] }}" data-login="{{ u[1]|lower }}" data-full-name="{{ u[2]|lower }}" data-group="{{ group_text|lower }}" data-role="{{ role_code }}">
-          <td class="checkbox-col"><input type="checkbox" form="bulkDeleteUsersForm" name="user_ids" value="{{ u[0] }}" data-bulk-item="user" {% if u[0] == session['user_id'] %}disabled{% endif %} /></td>
-          <td>{{ u[0] }}</td>
-          <td>{{ u[1] }}</td>
-          <td>{{ u[2] }}</td>
-          <td>{{ group_text }}</td>
-          <td>{{ role_text }}</td>
-          <td class="users-actions">
-            <form method="post">
-              <input type="hidden" name="section" value="overview" />
-              <input type="hidden" name="action" value="toggle_admin" />
-              <input type="hidden" name="target_user_id" value="{{ u[0] }}" />
-              <input type="hidden" name="make_admin" value="{{ 0 if u[4] else 1 }}" />
-              <input type="hidden" name="users_role" value="{{ users_role }}" />
-              <input type="hidden" name="users_group_id" value="{{ users_group_id_filter }}" />
-              <button type="submit">{{ 'Снять права админа' if u[4] else 'Выдать права админа' }}</button>
-            </form>
-            <form method="post" onsubmit="return confirm('Удалить пользователя ID {{ u[0] }}?');">
-              <input type="hidden" name="section" value="overview" />
-              <input type="hidden" name="action" value="delete_user" />
-              <input type="hidden" name="target_user_id" value="{{ u[0] }}" />
-              <input type="hidden" name="users_role" value="{{ users_role }}" />
-              <input type="hidden" name="users_group_id" value="{{ users_group_id_filter }}" />
-              <button type="submit" class="danger" {% if u[0] == session['user_id'] %}disabled{% endif %}>Удалить</button>
-            </form>
-          </td>
-        </tr>
-      {% endfor %}
-    </tbody>
-  </table>
 </section>
 
 

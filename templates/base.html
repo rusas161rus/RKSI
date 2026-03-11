@@ -18,6 +18,7 @@
         <a href="{{ url_for('me_layout_settings') }}" class="nav-link {% if request.endpoint == 'me_layout_settings' %}active{% endif %}">Настройка кабинета</a>
         {% if session.get('is_admin') %}
         <a href="{{ url_for('admin_dashboard') }}" class="nav-link {% if request.endpoint == 'admin_dashboard' %}active{% endif %}">Админ-панель</a>
+        <a href="{{ url_for('admin_users') }}" class="nav-link {% if request.endpoint == 'admin_users' %}active{% endif %}">Пользователи</a>
         <a href="{{ url_for('admin_monitor') }}" class="nav-link {% if request.endpoint == 'admin_monitor' %}active{% endif %}">Мониторинг</a>
         {% endif %}
         <a href="{{ url_for('logout') }}" class="nav-link">Выйти</a>

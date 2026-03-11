@@ -1,0 +1,227 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <h2>Пользователи</h2>
+  <p>Управление пользователями, правами администратора и доступом к ИИ.</p>
+</section>
+
+<section class="card">
+  <h3>Создание пользователя</h3>
+  <form method="post" class="grid-form compact-form">
+    <input type="hidden" name="action" value="create_user" />
+    <label>Логин
+      <input type="text" name="username" required />
+    </label>
+    <label>ФИО
+      <input type="text" name="full_name" />
+    </label>
+    <label>Пароль
+      <input type="text" name="password" required />
+    </label>
+    <label>Группа
+      <select name="preferred_group_id">
+        <option value="">Не выбрана</option>
+        {% for g in groups %}
+        <option value="{{ g[0] }}">{{ g[1] }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="inline-check"><input type="checkbox" name="is_admin" /> Выдать права админа</label>
+    <label class="inline-check"><input type="checkbox" name="ai_enabled" /> Разрешить ИИ</label>
+    <label>Лимит ИИ в день
+      <input type="number" name="ai_daily_limit" value="{{ default_ai_daily_limit }}" min="1" step="1" required />
+    </label>
+    <input type="hidden" name="users_role" value="{{ users_role }}" />
+    <input type="hidden" name="users_group_id" value="{{ users_group_id_filter }}" />
+    <input type="hidden" name="users_group_by" value="{{ users_group_by }}" />
+    <button type="submit">Создать пользователя</button>
+  </form>
+</section>
+
+<section class="card">
+  <h3>Список пользователей</h3>
+
+  <form method="get" class="grid-form users-filter-form">
+    <label>Фильтр по роли
+      <select name="users_role">
+        <option value="all" {% if users_role == 'all' %}selected{% endif %}>Все роли</option>
+        <option value="user" {% if users_role == 'user' %}selected{% endif %}>Только пользователи</option>
+        <option value="admin" {% if users_role == 'admin' %}selected{% endif %}>Только админы</option>
+      </select>
+    </label>
+    <label>Фильтр по группе
+      <select name="users_group_id">
+        <option value="all" {% if users_group_id_filter == 'all' %}selected{% endif %}>Все группы</option>
+        <option value="none" {% if users_group_id_filter == 'none' %}selected{% endif %}>Без группы</option>
+        {% for g in groups %}
+        <option value="{{ g[0] }}" {% if users_group_id_filter == (g[0]|string) %}selected{% endif %}>{{ g[1] }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <button type="submit">Применить</button>
+  </form>
+
+  <form method="post" id="bulkDeleteUsersForm" class="bulk-delete-form" onsubmit="return confirm('Удалить выбранных пользователей?');">
+    <input type="hidden" name="action" value="delete_users_bulk" />
+    <input type="hidden" name="users_role" value="{{ users_role }}" />
+    <input type="hidden" name="users_group_id" value="{{ users_group_id_filter }}" />
+    <input type="hidden" name="users_group_by" value="{{ users_group_by }}" />
+    <button type="submit" class="danger">Удалить выбранных</button>
+  </form>
+
+  <table class="dictionary-table users-table" id="usersTable">
+    <thead>
+      <tr>
+        <th class="checkbox-col"><input type="checkbox" data-bulk-toggle="user" aria-label="Выбрать всех пользователей" /></th>
+        <th><button type="button" class="users-group-toggle" data-group-field="id">ID</button></th>
+        <th><button type="button" class="users-group-toggle" data-group-field="login">Логин</button></th>
+        <th><button type="button" class="users-group-toggle" data-group-field="full_name">ФИО</button></th>
+        <th><button type="button" class="users-group-toggle" data-group-field="group">Группа</button></th>
+        <th><button type="button" class="users-group-toggle" data-group-field="role">Роль</button></th>
+        <th>ИИ</th>
+        <th>Лимит/день</th>
+        <th>Использовано сегодня</th>
+        <th>Действия</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for u in users %}
+        {% set role_code = 'admin' if u[4] else 'user' %}
+        {% set role_text = 'админ' if u[4] else 'пользователь' %}
+        {% set group_text = u[3] if u[3] else 'Без группы' %}
+        {% set ai_enabled = u[5] %}
+        {% set ai_limit = u[6] %}
+        {% set ai_used = u[7] %}
+        <tr data-user-row="1" data-id="{{ u[0] }}" data-login="{{ u[1]|lower }}" data-full-name="{{ u[2]|lower }}" data-group="{{ group_text|lower }}" data-role="{{ role_code }}">
+          <td class="checkbox-col"><input type="checkbox" form="bulkDeleteUsersForm" name="user_ids" value="{{ u[0] }}" data-bulk-item="user" {% if u[0] == session['user_id'] %}disabled{% endif %} /></td>
+          <td>{{ u[0] }}</td>
+          <td>{{ u[1] }}</td>
+          <td>{{ u[2] }}</td>
+          <td>{{ group_text }}</td>
+          <td>{{ role_text }}</td>
+          <td>{{ 'включен' if ai_enabled else 'выключен' }}</td>
+          <td>{{ ai_limit }}</td>
+          <td>{{ ai_used }}</td>
+          <td class="users-actions">
+            <form method="post">
+              <input type="hidden" name="action" value="toggle_admin" />
+              <input type="hidden" name="target_user_id" value="{{ u[0] }}" />
+              <input type="hidden" name="make_admin" value="{{ 0 if u[4] else 1 }}" />
+              <input type="hidden" name="users_role" value="{{ users_role }}" />
+              <input type="hidden" name="users_group_id" value="{{ users_group_id_filter }}" />
+              <input type="hidden" name="users_group_by" value="{{ users_group_by }}" />
+              <button type="submit">{{ 'Снять права админа' if u[4] else 'Выдать права админа' }}</button>
+            </form>
+
+            <form method="post" class="grid-form compact-form" style="min-width: 280px;">
+              <input type="hidden" name="action" value="save_user_ai_access" />
+              <input type="hidden" name="target_user_id" value="{{ u[0] }}" />
+              <input type="hidden" name="users_role" value="{{ users_role }}" />
+              <input type="hidden" name="users_group_id" value="{{ users_group_id_filter }}" />
+              <input type="hidden" name="users_group_by" value="{{ users_group_by }}" />
+              <label class="inline-check"><input type="checkbox" name="ai_enabled" {% if ai_enabled %}checked{% endif %} /> ИИ</label>
+              <label>Лимит
+                <input type="number" name="ai_daily_limit" value="{{ ai_limit }}" min="1" step="1" required />
+              </label>
+              <button type="submit">Сохранить ИИ</button>
+            </form>
+
+            <form method="post" onsubmit="return confirm('Удалить пользователя ID {{ u[0] }}?');">
+              <input type="hidden" name="action" value="delete_user" />
+              <input type="hidden" name="target_user_id" value="{{ u[0] }}" />
+              <input type="hidden" name="users_role" value="{{ users_role }}" />
+              <input type="hidden" name="users_group_id" value="{{ users_group_id_filter }}" />
+              <input type="hidden" name="users_group_by" value="{{ users_group_by }}" />
+              <button type="submit" class="danger" {% if u[0] == session['user_id'] %}disabled{% endif %}>Удалить</button>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<script>
+  (function () {
+    document.querySelectorAll('[data-bulk-toggle]').forEach(function (toggleEl) {
+      toggleEl.addEventListener('change', function () {
+        var kind = toggleEl.getAttribute('data-bulk-toggle');
+        document.querySelectorAll('[data-bulk-item="' + kind + '"]').forEach(function (itemEl) {
+          itemEl.checked = toggleEl.checked;
+        });
+      });
+    });
+
+    var usersTable = document.getElementById('usersTable');
+    if (!usersTable) return;
+    var usersTbody = usersTable.querySelector('tbody');
+    var userRows = Array.prototype.slice.call(usersTbody.querySelectorAll('tr[data-user-row="1"]'));
+    var activeGroupField = null;
+
+    function groupLabel(field, value) {
+      if (!value) return 'без группы';
+      if (field === 'role') return value === 'admin' ? 'админ' : 'пользователь';
+      return value;
+    }
+
+    function clearGroupRows() {
+      usersTbody.querySelectorAll('tr.users-group-row').forEach(function (row) { row.remove(); });
+    }
+
+    function resetHeaderState() {
+      usersTable.querySelectorAll('.users-group-toggle').forEach(function (btn) {
+        btn.classList.remove('is-active');
+      });
+    }
+
+    function regroupUsers(field) {
+      clearGroupRows();
+
+      if (!field) {
+        userRows.sort(function (a, b) { return Number(b.dataset.id) - Number(a.dataset.id); });
+        userRows.forEach(function (row) { usersTbody.appendChild(row); });
+        resetHeaderState();
+        activeGroupField = null;
+        return;
+      }
+
+      var sorted = userRows.slice().sort(function (a, b) {
+        var av = (a.dataset[field] || '').toLowerCase();
+        var bv = (b.dataset[field] || '').toLowerCase();
+        if (av < bv) return -1;
+        if (av > bv) return 1;
+        return Number(b.dataset.id) - Number(a.dataset.id);
+      });
+
+      var lastValue = null;
+      sorted.forEach(function (row) {
+        var currentValue = (row.dataset[field] || '').toLowerCase();
+        if (currentValue !== lastValue) {
+          var groupRow = document.createElement('tr');
+          groupRow.className = 'users-group-row';
+          var td = document.createElement('td');
+          td.colSpan = 10;
+          td.textContent = groupLabel(field, currentValue);
+          groupRow.appendChild(td);
+          usersTbody.appendChild(groupRow);
+          lastValue = currentValue;
+        }
+        usersTbody.appendChild(row);
+      });
+
+      resetHeaderState();
+      var activeBtn = usersTable.querySelector('.users-group-toggle[data-group-field="' + field + '"]');
+      if (activeBtn) activeBtn.classList.add('is-active');
+      activeGroupField = field;
+    }
+
+    usersTable.querySelectorAll('.users-group-toggle').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var field = btn.getAttribute('data-group-field');
+        if (activeGroupField === field) regroupUsers(null);
+        else regroupUsers(field);
+      });
+    });
+  })();
+</script>
+{% endblock %}

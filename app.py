@@ -125,6 +125,8 @@ RUNTIME_STATE_DEFAULTS = {
 RUNTIME_STATE_LOCKS = {"parser": Lock(), "planshetka": Lock()}
 APP_STARTED_AT = datetime.now()
 ONLINE_USERS_WINDOW_MINUTES = max(1, int((os.getenv("ONLINE_USERS_WINDOW_MINUTES") or "15").strip() or "15"))
+DEFAULT_AI_DAILY_LIMIT = max(1, int((os.getenv("DEFAULT_AI_DAILY_LIMIT") or "20").strip() or "20"))
+MAX_AI_DAILY_LIMIT = max(DEFAULT_AI_DAILY_LIMIT, 1000)
 MONITOR_STATE_LOCK = Lock()
 MONITOR_CPU_STATE = {"total": None, "idle": None, "ts": None}
 MONITOR_NET_STATE = {"rx": None, "tx": None, "ts": None}
@@ -215,6 +217,259 @@ def ensure_llm_ready() -> tuple[bool, str]:
         return True, ""
     except Exception as exc:
         return False, str(exc)
+
+
+def parse_ai_daily_limit(raw_value: str | None, default: int = DEFAULT_AI_DAILY_LIMIT) -> int:
+    text = (raw_value or "").strip()
+    if not text:
+        return int(default)
+    try:
+        parsed = int(text)
+    except Exception:
+        return int(default)
+    return max(1, min(MAX_AI_DAILY_LIMIT, parsed))
+
+
+def ensure_ai_access_tables() -> None:
+    with get_main_conn() as conn:
+        with conn.cursor() as cur:
+            lock_key = 741003120
+            cur.execute("SELECT pg_advisory_lock(%s)", (lock_key,))
+            try:
+                cur.execute(
+                    """
+                    ALTER TABLE IF EXISTS site_users
+                    ADD COLUMN IF NOT EXISTS ai_enabled BOOLEAN NOT NULL DEFAULT FALSE
+                    """
+                )
+                cur.execute(
+                    """
+                    ALTER TABLE IF EXISTS site_users
+                    ADD COLUMN IF NOT EXISTS ai_daily_limit INTEGER NOT NULL DEFAULT %s
+                    """,
+                    (DEFAULT_AI_DAILY_LIMIT,),
+                )
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS ai_usage_daily (
+                        user_id BIGINT NOT NULL REFERENCES site_users(id) ON DELETE CASCADE,
+                        usage_date DATE NOT NULL,
+                        requests_count INTEGER NOT NULL DEFAULT 0,
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                        PRIMARY KEY (user_id, usage_date)
+                    )
+                    """
+                )
+                cur.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_ai_usage_daily_date
+                    ON ai_usage_daily(usage_date, user_id)
+                    """
+                )
+            finally:
+                cur.execute("SELECT pg_advisory_unlock(%s)", (lock_key,))
+
+
+def get_ai_access_state(user_id: int) -> dict[str, object]:
+    with get_main_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                    COALESCE(u.ai_enabled, FALSE),
+                    GREATEST(1, COALESCE(u.ai_daily_limit, %s)),
+                    EXISTS(SELECT 1 FROM site_admins a WHERE a.user_id = u.id) AS is_admin
+                FROM site_users u
+                WHERE u.id = %s
+                """,
+                (DEFAULT_AI_DAILY_LIMIT, user_id),
+            )
+            row = cur.fetchone()
+            if not row:
+                return {
+                    "exists": False,
+                    "is_admin": False,
+                    "ai_enabled": False,
+                    "daily_limit": DEFAULT_AI_DAILY_LIMIT,
+                    "used_today": 0,
+                    "remaining_today": 0,
+                    "can_open_ai": False,
+                    "can_send_message": False,
+                    "denied_reason": "Пользователь не найден.",
+                }
+
+            ai_enabled = bool(row[0])
+            daily_limit = int(row[1] or DEFAULT_AI_DAILY_LIMIT)
+            is_admin = bool(row[2])
+
+            cur.execute(
+                """
+                SELECT COALESCE(requests_count, 0)
+                FROM ai_usage_daily
+                WHERE user_id = %s AND usage_date = CURRENT_DATE
+                """,
+                (user_id,),
+            )
+            usage_row = cur.fetchone()
+            used_today = int(usage_row[0]) if usage_row else 0
+
+    if is_admin:
+        return {
+            "exists": True,
+            "is_admin": True,
+            "ai_enabled": True,
+            "daily_limit": daily_limit,
+            "used_today": used_today,
+            "remaining_today": None,
+            "can_open_ai": True,
+            "can_send_message": True,
+            "denied_reason": "",
+        }
+
+    remaining_today = max(0, daily_limit - used_today)
+    if not ai_enabled:
+        denied_reason = "Доступ к ИИ отключён администратором."
+    elif remaining_today <= 0:
+        denied_reason = f"Дневной лимит ИИ исчерпан ({daily_limit} запросов)."
+    else:
+        denied_reason = ""
+
+    return {
+        "exists": True,
+        "is_admin": False,
+        "ai_enabled": ai_enabled,
+        "daily_limit": daily_limit,
+        "used_today": used_today,
+        "remaining_today": remaining_today,
+        "can_open_ai": ai_enabled,
+        "can_send_message": ai_enabled and remaining_today > 0,
+        "denied_reason": denied_reason,
+    }
+
+
+def consume_ai_chat_quota(user_id: int) -> tuple[bool, dict[str, object], str]:
+    with get_main_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                    COALESCE(u.ai_enabled, FALSE),
+                    GREATEST(1, COALESCE(u.ai_daily_limit, %s)),
+                    EXISTS(SELECT 1 FROM site_admins a WHERE a.user_id = u.id) AS is_admin
+                FROM site_users u
+                WHERE u.id = %s
+                """,
+                (DEFAULT_AI_DAILY_LIMIT, user_id),
+            )
+            row = cur.fetchone()
+            if not row:
+                state = {
+                    "exists": False,
+                    "is_admin": False,
+                    "ai_enabled": False,
+                    "daily_limit": DEFAULT_AI_DAILY_LIMIT,
+                    "used_today": 0,
+                    "remaining_today": 0,
+                    "can_open_ai": False,
+                    "can_send_message": False,
+                    "denied_reason": "Пользователь не найден.",
+                }
+                return False, state, str(state["denied_reason"])
+
+            ai_enabled = bool(row[0])
+            daily_limit = int(row[1] or DEFAULT_AI_DAILY_LIMIT)
+            is_admin = bool(row[2])
+
+            if is_admin:
+                state = {
+                    "exists": True,
+                    "is_admin": True,
+                    "ai_enabled": True,
+                    "daily_limit": daily_limit,
+                    "used_today": 0,
+                    "remaining_today": None,
+                    "can_open_ai": True,
+                    "can_send_message": True,
+                    "denied_reason": "",
+                }
+                return True, state, ""
+
+            cur.execute(
+                """
+                SELECT COALESCE(requests_count, 0)
+                FROM ai_usage_daily
+                WHERE user_id = %s AND usage_date = CURRENT_DATE
+                """,
+                (user_id,),
+            )
+            usage_row = cur.fetchone()
+            used_before = int(usage_row[0]) if usage_row else 0
+
+            if not ai_enabled:
+                state = {
+                    "exists": True,
+                    "is_admin": False,
+                    "ai_enabled": False,
+                    "daily_limit": daily_limit,
+                    "used_today": used_before,
+                    "remaining_today": max(0, daily_limit - used_before),
+                    "can_open_ai": False,
+                    "can_send_message": False,
+                    "denied_reason": "Доступ к ИИ отключён администратором.",
+                }
+                return False, state, str(state["denied_reason"])
+
+            cur.execute(
+                """
+                INSERT INTO ai_usage_daily(user_id, usage_date, requests_count, updated_at)
+                VALUES (%s, CURRENT_DATE, 1, now())
+                ON CONFLICT (user_id, usage_date)
+                DO UPDATE SET
+                    requests_count = ai_usage_daily.requests_count + 1,
+                    updated_at = now()
+                WHERE ai_usage_daily.requests_count < %s
+                RETURNING requests_count
+                """,
+                (user_id, daily_limit),
+            )
+            consume_row = cur.fetchone()
+            if not consume_row:
+                cur.execute(
+                    """
+                    SELECT COALESCE(requests_count, 0)
+                    FROM ai_usage_daily
+                    WHERE user_id = %s AND usage_date = CURRENT_DATE
+                    """,
+                    (user_id,),
+                )
+                usage_row = cur.fetchone()
+                used_today = int(usage_row[0]) if usage_row else used_before
+                state = {
+                    "exists": True,
+                    "is_admin": False,
+                    "ai_enabled": True,
+                    "daily_limit": daily_limit,
+                    "used_today": used_today,
+                    "remaining_today": 0,
+                    "can_open_ai": True,
+                    "can_send_message": False,
+                    "denied_reason": f"Дневной лимит ИИ исчерпан ({daily_limit} запросов).",
+                }
+                return False, state, str(state["denied_reason"])
+
+            used_today = int(consume_row[0])
+            state = {
+                "exists": True,
+                "is_admin": False,
+                "ai_enabled": True,
+                "daily_limit": daily_limit,
+                "used_today": used_today,
+                "remaining_today": max(0, daily_limit - used_today),
+                "can_open_ai": True,
+                "can_send_message": True,
+                "denied_reason": "",
+            }
+            return True, state, ""
 
 
 def login_required(view):
@@ -948,6 +1203,11 @@ def ai_assistant_page():
         session.clear()
         return redirect(url_for("login"))
 
+    ai_access = get_ai_access_state(int(user["id"]))
+    if not ai_access.get("can_open_ai"):
+        flash(str(ai_access.get("denied_reason") or "Доступ к ИИ недоступен."), "error")
+        return redirect(url_for("me"))
+
     llm_ready, llm_error = ensure_llm_ready()
     ai_messages = []
     ai_settings = {"allow_note_creation": False}
@@ -973,12 +1233,16 @@ def ai_assistant_page():
         llm_ready=llm_ready,
         llm_error=llm_error,
         ollama_model=(os.getenv("OLLAMA_MODEL") or "qwen2.5:7b-instruct").strip(),
+        ai_access=ai_access,
     )
 
 
 @app.route("/api/ai/settings", methods=["POST"])
 @login_required
 def api_ai_settings():
+    ai_access = get_ai_access_state(int(session["user_id"]))
+    if not ai_access.get("can_open_ai"):
+        return jsonify({"ok": False, "error": ai_access.get("denied_reason") or "Доступ к ИИ недоступен."}), 403
     llm_ready, llm_error = ensure_llm_ready()
     if not llm_ready:
         return jsonify({"ok": False, "error": f"LLM storage unavailable: {llm_error}"}), 503
@@ -1003,6 +1267,20 @@ def api_ai_chat():
         return jsonify({"ok": False, "error": "Введите сообщение для ИИ."}), 400
 
     user_id = int(session["user_id"])
+    allowed, ai_access, denied_reason = consume_ai_chat_quota(user_id)
+    if not allowed:
+        return jsonify(
+            {
+                "ok": False,
+                "error": denied_reason or "Доступ к ИИ недоступен.",
+                "meta": {
+                    "ai_used_today": ai_access.get("used_today"),
+                    "ai_daily_limit": ai_access.get("daily_limit"),
+                    "ai_remaining_today": ai_access.get("remaining_today"),
+                },
+            }
+        ), 403
+
     chat_session_id = get_or_create_chat_session(user_id)
     save_chat_message(chat_session_id, "user", message_text)
     ai_settings = get_ai_user_settings(user_id)
@@ -1135,6 +1413,9 @@ def api_ai_chat():
 @app.route("/api/ai/clear", methods=["POST"])
 @login_required
 def api_ai_clear():
+    ai_access = get_ai_access_state(int(session["user_id"]))
+    if not ai_access.get("can_open_ai"):
+        return jsonify({"ok": False, "error": ai_access.get("denied_reason") or "Доступ к ИИ недоступен."}), 403
     llm_ready, llm_error = ensure_llm_ready()
     if not llm_ready:
         return jsonify({"ok": False, "error": f"LLM storage unavailable: {llm_error}"}), 503
@@ -1149,6 +1430,9 @@ def api_ai_clear():
 @app.route("/api/ai/note-action", methods=["POST"])
 @login_required
 def api_ai_note_action():
+    ai_access = get_ai_access_state(int(session["user_id"]))
+    if not ai_access.get("can_open_ai"):
+        return jsonify({"ok": False, "error": ai_access.get("denied_reason") or "Доступ к ИИ недоступен."}), 403
     llm_ready, llm_error = ensure_llm_ready()
     if not llm_ready:
         return jsonify({"ok": False, "error": f"LLM storage unavailable: {llm_error}"}), 503
@@ -1876,6 +2160,199 @@ def admin_dashboard():
     )
 
 
+@app.route("/admin/users", methods=["GET", "POST"])
+@admin_required
+def admin_users():
+    ensure_personalization_tables()
+    ensure_ai_access_tables()
+
+    action = request.form.get("action")
+    users_role = (request.values.get("users_role") or "all").strip().lower()
+    if users_role not in {"all", "admin", "user"}:
+        users_role = "all"
+
+    users_group_id_filter = (request.values.get("users_group_id") or "all").strip().lower()
+    if users_group_id_filter != "all" and users_group_id_filter != "none" and not users_group_id_filter.isdigit():
+        users_group_id_filter = "all"
+
+    users_group_by = (request.values.get("users_group_by") or "none").strip().lower()
+    if users_group_by not in {"none", "role", "group"}:
+        users_group_by = "none"
+
+    with get_main_conn() as conn:
+        with conn.cursor() as cur:
+            if request.method == "POST":
+                if action == "create_user":
+                    username = (request.form.get("username") or "").strip()
+                    full_name = (request.form.get("full_name") or "").strip()
+                    password = request.form.get("password") or ""
+                    preferred_group_raw = (request.form.get("preferred_group_id") or "").strip()
+                    preferred_group_id = int(preferred_group_raw) if preferred_group_raw.isdigit() else None
+                    is_admin = request.form.get("is_admin") == "on"
+                    ai_enabled = request.form.get("ai_enabled") == "on"
+                    ai_daily_limit = parse_ai_daily_limit(request.form.get("ai_daily_limit"), DEFAULT_AI_DAILY_LIMIT)
+
+                    if username and password:
+                        cur.execute("SELECT 1 FROM site_users WHERE lower(username) = lower(%s) LIMIT 1", (username,))
+                        if cur.fetchone():
+                            flash("Пользователь с таким логином уже существует.", "error")
+                        else:
+                            cur.execute(
+                                """
+                                INSERT INTO site_users(
+                                    username, password_hash, full_name, preferred_group_id,
+                                    ai_enabled, ai_daily_limit
+                                )
+                                VALUES (%s, %s, %s, %s, %s, %s)
+                                RETURNING id
+                                """,
+                                (
+                                    username,
+                                    generate_password_hash(password),
+                                    full_name or None,
+                                    preferred_group_id,
+                                    ai_enabled,
+                                    ai_daily_limit,
+                                ),
+                            )
+                            new_user_id = int(cur.fetchone()[0])
+                            if is_admin:
+                                cur.execute("INSERT INTO site_admins(user_id) VALUES (%s) ON CONFLICT (user_id) DO NOTHING", (new_user_id,))
+                            flash("Пользователь создан.", "success")
+                    else:
+                        flash("Укажите логин и пароль.", "error")
+
+                elif action == "toggle_admin":
+                    uid = (request.form.get("target_user_id") or "").strip()
+                    make_admin = request.form.get("make_admin") == "1"
+                    if uid.isdigit():
+                        if make_admin:
+                            cur.execute("INSERT INTO site_admins(user_id) VALUES (%s) ON CONFLICT (user_id) DO NOTHING", (uid,))
+                        else:
+                            cur.execute("DELETE FROM site_admins WHERE user_id = %s", (uid,))
+                        flash("Права админа выданы." if make_admin else "Права админа сняты.", "success")
+                    else:
+                        flash("Укажите корректный ID пользователя.", "error")
+
+                elif action == "save_user_ai_access":
+                    uid = (request.form.get("target_user_id") or "").strip()
+                    ai_enabled = request.form.get("ai_enabled") == "on"
+                    ai_daily_limit = parse_ai_daily_limit(request.form.get("ai_daily_limit"), DEFAULT_AI_DAILY_LIMIT)
+                    if uid.isdigit():
+                        cur.execute(
+                            """
+                            UPDATE site_users
+                            SET ai_enabled = %s,
+                                ai_daily_limit = %s,
+                                updated_at = now()
+                            WHERE id = %s
+                            """,
+                            (ai_enabled, ai_daily_limit, int(uid)),
+                        )
+                        flash("Права ИИ обновлены." if cur.rowcount else "Пользователь не найден.", "success" if cur.rowcount else "error")
+                    else:
+                        flash("Укажите корректный ID пользователя.", "error")
+
+                elif action == "delete_user":
+                    uid = (request.form.get("target_user_id") or "").strip()
+                    if uid.isdigit():
+                        if int(uid) == int(session["user_id"]):
+                            flash("Нельзя удалить текущего авторизованного пользователя.", "error")
+                        else:
+                            cur.execute("DELETE FROM site_users WHERE id = %s", (uid,))
+                            flash("Пользователь удален." if cur.rowcount else "Пользователь не найден.", "success" if cur.rowcount else "error")
+                    else:
+                        flash("Укажите корректный ID пользователя.", "error")
+
+                elif action == "delete_users_bulk":
+                    selected_ids = parse_int_ids(request.form.getlist("user_ids"))
+                    if not selected_ids:
+                        flash("Выберите хотя бы одного пользователя для удаления.", "error")
+                    else:
+                        current_user_id = int(session["user_id"])
+                        ids_to_delete = [uid for uid in selected_ids if uid != current_user_id]
+                        skipped_current_user = len(selected_ids) - len(ids_to_delete)
+                        if not ids_to_delete:
+                            flash("Нельзя удалить текущего авторизованного пользователя.", "error")
+                        else:
+                            deleted, missing, failed = delete_rows_with_savepoints(cur, "site_users", ids_to_delete)
+                            if deleted:
+                                flash(f"Удалено пользователей: {deleted}.", "success")
+                            if missing:
+                                flash(f"Пользователи не найдены: {', '.join(str(v) for v in missing)}.", "error")
+                            if failed:
+                                flash(f"Не удалось удалить пользователей: {', '.join(str(v) for v in failed)}.", "error")
+                        if skipped_current_user:
+                            flash("Текущий авторизованный пользователь не был удален.", "error")
+
+                return redirect(
+                    url_for(
+                        "admin_users",
+                        users_role=(request.form.get("users_role") or None),
+                        users_group_id=(request.form.get("users_group_id") or None),
+                        users_group_by=(request.form.get("users_group_by") or None),
+                    )
+                )
+
+            cur.execute("SELECT id, group_name FROM study_groups ORDER BY group_name")
+            groups = cur.fetchall()
+
+            users_sql = """
+                SELECT
+                    u.id,
+                    u.username,
+                    COALESCE(u.full_name, ''),
+                    COALESCE(g.group_name, ''),
+                    EXISTS(SELECT 1 FROM site_admins a WHERE a.user_id = u.id) AS is_admin,
+                    COALESCE(u.ai_enabled, FALSE) AS ai_enabled,
+                    GREATEST(1, COALESCE(u.ai_daily_limit, %s)) AS ai_daily_limit,
+                    COALESCE(d.requests_count, 0) AS ai_used_today
+                FROM site_users u
+                LEFT JOIN study_groups g ON g.id = u.preferred_group_id
+                LEFT JOIN ai_usage_daily d
+                  ON d.user_id = u.id
+                 AND d.usage_date = CURRENT_DATE
+            """
+            users_params: list = [DEFAULT_AI_DAILY_LIMIT]
+            users_where: list[str] = []
+
+            if users_role == "admin":
+                users_where.append("EXISTS(SELECT 1 FROM site_admins a WHERE a.user_id = u.id)")
+            elif users_role == "user":
+                users_where.append("NOT EXISTS(SELECT 1 FROM site_admins a WHERE a.user_id = u.id)")
+
+            if users_group_id_filter == "none":
+                users_where.append("u.preferred_group_id IS NULL")
+            elif users_group_id_filter.isdigit():
+                users_where.append("u.preferred_group_id = %s")
+                users_params.append(int(users_group_id_filter))
+
+            if users_where:
+                users_sql += " WHERE " + " AND ".join(users_where)
+
+            if users_group_by == "role":
+                users_sql += " ORDER BY is_admin DESC, COALESCE(g.group_name, ''), u.id DESC"
+            elif users_group_by == "group":
+                users_sql += " ORDER BY COALESCE(g.group_name, ''), is_admin DESC, u.id DESC"
+            else:
+                users_sql += " ORDER BY u.id DESC"
+
+            users_sql += " LIMIT 500"
+            cur.execute(users_sql, tuple(users_params))
+            users = cur.fetchall()
+
+    return render_template(
+        "admin_users.html",
+        title="Пользователи",
+        groups=groups,
+        users=users,
+        users_role=users_role,
+        users_group_id_filter=users_group_id_filter,
+        users_group_by=users_group_by,
+        default_ai_daily_limit=DEFAULT_AI_DAILY_LIMIT,
+    )
+
+
 @app.route("/admin/monitor")
 @admin_required
 def admin_monitor():
@@ -1938,6 +2415,7 @@ def initialize_app_runtime() -> None:
         ("runtime state", ensure_runtime_state_table),
         ("personalization", ensure_personalization_tables),
         ("bot tables", ensure_bot_tables),
+        ("ai access control", ensure_ai_access_tables),
         ("monitoring tables", ensure_monitoring_tables),
         ("runtime state encoding", repair_runtime_state_encoding),
         ("runtime state flags", reset_runtime_state_flags),

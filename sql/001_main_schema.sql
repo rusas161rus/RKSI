@@ -28,6 +28,8 @@ CREATE TABLE IF NOT EXISTS site_users (
   password_hash TEXT NOT NULL,
   full_name TEXT,
   preferred_group_id BIGINT REFERENCES study_groups(id) ON DELETE SET NULL,
+  ai_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+  ai_daily_limit INTEGER NOT NULL DEFAULT 20,
   is_active BOOLEAN NOT NULL DEFAULT TRUE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -81,9 +83,20 @@ CREATE INDEX IF NOT EXISTS idx_schedule_date_time ON schedule_entries(lesson_dat
 CREATE INDEX IF NOT EXISTS idx_schedule_subject ON schedule_entries(subject_id);
 CREATE INDEX IF NOT EXISTS idx_schedule_teacher ON schedule_entries(teacher_id);
 CREATE INDEX IF NOT EXISTS idx_users_group ON site_users(preferred_group_id);
+CREATE INDEX IF NOT EXISTS idx_site_users_ai_enabled ON site_users(ai_enabled);
 
 CREATE INDEX IF NOT EXISTS idx_parsed_group_date ON parsed_schedule_entries(group_id, lesson_date);
 CREATE INDEX IF NOT EXISTS idx_parsed_date_time ON parsed_schedule_entries(lesson_date, start_time);
+
+CREATE TABLE IF NOT EXISTS ai_usage_daily (
+  user_id BIGINT NOT NULL REFERENCES site_users(id) ON DELETE CASCADE,
+  usage_date DATE NOT NULL,
+  requests_count INTEGER NOT NULL DEFAULT 0,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, usage_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ai_usage_daily_date ON ai_usage_daily(usage_date, user_id);
 
 ALTER TABLE schedule_entries
   DROP CONSTRAINT IF EXISTS ex_manual_schedule_no_overlap;
