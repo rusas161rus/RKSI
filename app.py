@@ -2146,6 +2146,26 @@ def admin_dashboard():
     auto_cfg = get_auto_schedule()
     telegram_settings = load_telegram_settings()
     announcements = fetch_admin_announcements()
+    if announcements:
+        announcement_ids = [int(item["id"]) for item in announcements if item.get("id") is not None]
+        author_by_announcement_id: dict[int, str] = {}
+        if announcement_ids:
+            with get_main_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT
+                            a.id,
+                            COALESCE(NULLIF(BTRIM(u.full_name), ''), NULLIF(BTRIM(u.username), ''), '-') AS author_name
+                        FROM group_announcements a
+                        LEFT JOIN site_users u ON u.id = a.created_by_user_id
+                        WHERE a.id = ANY(%s)
+                        """,
+                        (announcement_ids,),
+                    )
+                    author_by_announcement_id = {int(row[0]): row[1] for row in cur.fetchall()}
+        for item in announcements:
+            item["author_name"] = author_by_announcement_id.get(int(item["id"]), "-")
     return render_template(
         "admin_dashboard.html",
         title="Админ-панель",

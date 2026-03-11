@@ -487,6 +487,7 @@ th, td {
   .day-column { padding: 0.62rem; }
   .monitor-history-grid { grid-template-columns: 1fr; }
   .monitor-plot-shell canvas { height: 220px; }
+  .admin-announcement-form { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
 }
 
 
@@ -556,6 +557,22 @@ th, td {
 
 .admin-switch form {
   flex: 0 1 220px;
+}
+
+.admin-announcement-form {
+  grid-template-columns: minmax(180px, 1fr) minmax(220px, 1fr) minmax(260px, 1fr) auto;
+  align-items: end;
+}
+
+.admin-announcement-form__submit {
+  width: auto;
+  min-width: 220px;
+  max-width: 260px;
+  min-height: 2.4rem;
+  padding: 0.45rem 0.9rem;
+  justify-self: start;
+  align-self: end;
+  white-space: nowrap;
 }
 
 .dictionary-grid {
