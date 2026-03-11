@@ -1,0 +1,160 @@
+﻿{% extends "base.html" %}
+{% block content %}
+<section class="card monitor-hero">
+  <h2>Мониторинг</h2>
+  <p class="meta">Живые метрики приложения и сервера (обновление каждые 5 секунд).</p>
+</section>
+
+<section class="monitor-grid">
+  <article class="card monitor-card">
+    <h3>Время приложения</h3>
+    <p class="monitor-value" id="monitorAppTime">{{ metrics.app_time_text }}</p>
+    <p class="meta">Аптайм приложения: <span id="monitorAppUptime" data-seconds="{{ metrics.app_uptime_seconds or 0 }}">{{ metrics.app_uptime_seconds or 0 }} сек</span></p>
+    <p class="meta">Аптайм сервера: <span id="monitorServerUptime" data-seconds="{{ metrics.server_uptime_seconds or 0 }}">{{ metrics.server_uptime_seconds or 0 }} сек</span></p>
+  </article>
+
+  <article class="card monitor-card">
+    <h3>Пользователи онлайн</h3>
+    <p class="monitor-value" id="monitorOnlineUsers">{{ online_users }}</p>
+    <p class="meta">Активность за последние {{ online_window_minutes }} мин.</p>
+    {% if online_error %}
+    <p class="alert alert-error">Ошибка подсчёта: {{ online_error }}</p>
+    {% endif %}
+  </article>
+
+  <article class="card monitor-card">
+    <h3>CPU</h3>
+    <p class="monitor-value" id="monitorCpu">{% if metrics.cpu_percent is not none %}{{ '%.2f'|format(metrics.cpu_percent) }} %{% else %}—{% endif %}</p>
+    <div class="monitor-bar"><span id="monitorCpuBar" style="width: {% if metrics.cpu_percent is not none %}{{ '%.2f'|format(metrics.cpu_percent) }}{% else %}0{% endif %}%;"></span></div>
+    <p class="meta">Потоков CPU: {{ metrics.cpu_count or '-' }}</p>
+  </article>
+
+  <article class="card monitor-card">
+    <h3>Память</h3>
+    <p class="monitor-value" id="monitorMemUsed">—</p>
+    <div class="monitor-bar"><span id="monitorMemBar" style="width: 0%;"></span></div>
+    <p class="meta" id="monitorMemTotal">—</p>
+  </article>
+
+  <article class="card monitor-card">
+    <h3>Сеть</h3>
+    <p class="monitor-value">RX: <span id="monitorNetRx">—</span></p>
+    <p class="monitor-value">TX: <span id="monitorNetTx">—</span></p>
+  </article>
+
+  <article class="card monitor-card">
+    <h3>Система</h3>
+    <p class="meta" id="monitorPlatform">{{ metrics.platform or '-' }}</p>
+  </article>
+</section>
+
+<script>
+  (function () {
+    var appTimeNode = document.getElementById('monitorAppTime');
+    var appUptimeNode = document.getElementById('monitorAppUptime');
+    var serverUptimeNode = document.getElementById('monitorServerUptime');
+    var onlineUsersNode = document.getElementById('monitorOnlineUsers');
+    var cpuNode = document.getElementById('monitorCpu');
+    var cpuBarNode = document.getElementById('monitorCpuBar');
+    var memUsedNode = document.getElementById('monitorMemUsed');
+    var memTotalNode = document.getElementById('monitorMemTotal');
+    var memBarNode = document.getElementById('monitorMemBar');
+    var netRxNode = document.getElementById('monitorNetRx');
+    var netTxNode = document.getElementById('monitorNetTx');
+    var platformNode = document.getElementById('monitorPlatform');
+
+    function toNumber(value) {
+      var n = Number(value);
+      return Number.isFinite(n) ? n : null;
+    }
+
+    function formatBytes(bytes) {
+      var n = toNumber(bytes);
+      if (n === null || n < 0) return '—';
+      var units = ['Б', 'КБ', 'МБ', 'ГБ', 'ТБ'];
+      var idx = 0;
+      while (n >= 1024 && idx < units.length - 1) {
+        n /= 1024;
+        idx += 1;
+      }
+      return n.toFixed(idx === 0 ? 0 : 2) + ' ' + units[idx];
+    }
+
+    function formatSpeed(bps) {
+      var n = toNumber(bps);
+      if (n === null) return '—';
+      return formatBytes(n) + '/с';
+    }
+
+    function formatDuration(totalSeconds) {
+      var n = Math.max(0, Math.floor(toNumber(totalSeconds) || 0));
+      var days = Math.floor(n / 86400);
+      var hours = Math.floor((n % 86400) / 3600);
+      var minutes = Math.floor((n % 3600) / 60);
+      var seconds = n % 60;
+      return days + 'д ' + hours + 'ч ' + minutes + 'м ' + seconds + 'с';
+    }
+
+    function setBar(node, percent) {
+      if (!node) return;
+      var safe = Math.max(0, Math.min(100, toNumber(percent) || 0));
+      node.style.width = safe.toFixed(2) + '%';
+    }
+
+    function render(data) {
+      if (!data) return;
+      if (appTimeNode && data.app_time_text) appTimeNode.textContent = data.app_time_text;
+      if (appUptimeNode) appUptimeNode.textContent = formatDuration(data.app_uptime_seconds);
+      if (serverUptimeNode) serverUptimeNode.textContent = formatDuration(data.server_uptime_seconds);
+      if (onlineUsersNode && data.online_users !== undefined) onlineUsersNode.textContent = String(data.online_users);
+
+      var cpuPercent = toNumber(data.cpu_percent);
+      if (cpuNode) cpuNode.textContent = cpuPercent === null ? '—' : cpuPercent.toFixed(2) + ' %';
+      setBar(cpuBarNode, cpuPercent || 0);
+
+      var memUsed = toNumber(data.memory_used_bytes);
+      var memTotal = toNumber(data.memory_total_bytes);
+      var memPercent = (memUsed !== null && memTotal && memTotal > 0) ? ((memUsed / memTotal) * 100) : 0;
+      if (memUsedNode) memUsedNode.textContent = memUsed === null ? '—' : formatBytes(memUsed);
+      if (memTotalNode) {
+        memTotalNode.textContent = memTotal === null ? '—' : ('Всего: ' + formatBytes(memTotal));
+      }
+      setBar(memBarNode, memPercent);
+
+      if (netRxNode) netRxNode.textContent = formatSpeed(data.network_rx_bps);
+      if (netTxNode) netTxNode.textContent = formatSpeed(data.network_tx_bps);
+      if (platformNode && data.platform) platformNode.textContent = data.platform;
+    }
+
+    function poll() {
+      return fetch('{{ url_for("admin_monitor_status") }}', { cache: 'no-store' })
+        .then(function (response) { return response.json(); })
+        .then(function (payload) {
+          if (!payload || !payload.ok) return;
+          var merged = Object.assign({}, payload.metrics || {}, {
+            online_users: payload.online_users,
+            online_window_minutes: payload.online_window_minutes
+          });
+          render(merged);
+        })
+        .catch(function () {});
+    }
+
+    render({
+      app_time_text: '{{ metrics.app_time_text }}',
+      app_uptime_seconds: {{ metrics.app_uptime_seconds or 0 }},
+      server_uptime_seconds: {{ metrics.server_uptime_seconds or 0 }},
+      online_users: {{ online_users or 0 }},
+      cpu_percent: {% if metrics.cpu_percent is not none %}{{ metrics.cpu_percent }}{% else %}null{% endif %},
+      memory_total_bytes: {% if metrics.memory_total_bytes is not none %}{{ metrics.memory_total_bytes }}{% else %}null{% endif %},
+      memory_used_bytes: {% if metrics.memory_used_bytes is not none %}{{ metrics.memory_used_bytes }}{% else %}null{% endif %},
+      network_rx_bps: {% if metrics.network_rx_bps is not none %}{{ metrics.network_rx_bps }}{% else %}null{% endif %},
+      network_tx_bps: {% if metrics.network_tx_bps is not none %}{{ metrics.network_tx_bps }}{% else %}null{% endif %},
+      platform: {{ (metrics.platform or '') | tojson }}
+    });
+
+    poll();
+    window.setInterval(poll, 5000);
+  })();
+</script>
+{% endblock %}

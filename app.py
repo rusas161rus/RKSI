@@ -1,5 +1,7 @@
 ﻿import os
+import platform
 import re
+import time
 from datetime import date, datetime, timedelta
 from functools import wraps
 from threading import Lock, Thread
@@ -121,6 +123,11 @@ RUNTIME_STATE_DEFAULTS = {
     },
 }
 RUNTIME_STATE_LOCKS = {"parser": Lock(), "planshetka": Lock()}
+APP_STARTED_AT = datetime.now()
+ONLINE_USERS_WINDOW_MINUTES = max(1, int((os.getenv("ONLINE_USERS_WINDOW_MINUTES") or "15").strip() or "15"))
+MONITOR_STATE_LOCK = Lock()
+MONITOR_CPU_STATE = {"total": None, "idle": None, "ts": None}
+MONITOR_NET_STATE = {"rx": None, "tx": None, "ts": None}
 
 INVALID_TEACHER_NAME_RE = re.compile(r"^[\s_.-]+$")
 
@@ -231,6 +238,18 @@ def admin_required(view):
     return wrapped
 
 
+@app.before_request
+def mark_online_user():
+    user_id = session.get("user_id")
+    if not user_id:
+        return
+    try:
+        touch_user_presence(int(user_id))
+    except Exception:
+        # Online-метрики не должны ломать основной запрос.
+        pass
+
+
 def load_user(user_id: int):
     with get_main_conn() as conn:
         with conn.cursor() as cur:
@@ -257,6 +276,194 @@ def load_user(user_id: int):
         "telegram_lesson_notifications_enabled": row[8],
         "telegram_linked_at": row[9],
         "is_admin": row[10],
+    }
+
+
+def ensure_monitoring_tables() -> None:
+    with get_main_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS online_user_presence (
+                    user_id BIGINT PRIMARY KEY REFERENCES site_users(id) ON DELETE CASCADE,
+                    last_seen TIMESTAMPTZ NOT NULL DEFAULT now()
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_online_user_presence_last_seen
+                ON online_user_presence(last_seen DESC)
+                """
+            )
+
+
+def touch_user_presence(user_id: int) -> None:
+    with get_main_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO online_user_presence(user_id, last_seen)
+                VALUES (%s, now())
+                ON CONFLICT (user_id)
+                DO UPDATE SET last_seen = EXCLUDED.last_seen
+                """,
+                (user_id,),
+            )
+
+
+def count_online_users(window_minutes: int = ONLINE_USERS_WINDOW_MINUTES) -> int:
+    with get_main_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT COUNT(*)
+                FROM online_user_presence
+                WHERE last_seen >= now() - (%s * interval '1 minute')
+                """,
+                (max(1, int(window_minutes)),),
+            )
+            row = cur.fetchone()
+    return int(row[0]) if row else 0
+
+
+def _read_linux_cpu_totals() -> tuple[int, int] | None:
+    try:
+        with open("/proc/stat", "r", encoding="utf-8") as fh:
+            first = fh.readline().strip()
+        if not first.startswith("cpu "):
+            return None
+        parts = [int(value) for value in first.split()[1:] if value.isdigit()]
+        if len(parts) < 4:
+            return None
+        total = sum(parts)
+        idle = parts[3] + (parts[4] if len(parts) > 4 else 0)
+        return total, idle
+    except Exception:
+        return None
+
+
+def _cpu_percent() -> float | None:
+    now_ts = time.time()
+    totals = _read_linux_cpu_totals()
+    if not totals:
+        return None
+    total, idle = totals
+    with MONITOR_STATE_LOCK:
+        prev_total = MONITOR_CPU_STATE["total"]
+        prev_idle = MONITOR_CPU_STATE["idle"]
+        MONITOR_CPU_STATE.update({"total": total, "idle": idle, "ts": now_ts})
+    if prev_total is None or prev_idle is None:
+        return None
+    delta_total = total - int(prev_total)
+    delta_idle = idle - int(prev_idle)
+    if delta_total <= 0:
+        return None
+    busy_ratio = max(0.0, min(1.0, 1.0 - (delta_idle / delta_total)))
+    return round(busy_ratio * 100.0, 2)
+
+
+def _memory_stats_bytes() -> dict[str, int] | None:
+    try:
+        values: dict[str, int] = {}
+        with open("/proc/meminfo", "r", encoding="utf-8") as fh:
+            for line in fh:
+                if ":" not in line:
+                    continue
+                key, raw = line.split(":", 1)
+                token = raw.strip().split()[0]
+                if token.isdigit():
+                    values[key] = int(token) * 1024
+        total = values.get("MemTotal")
+        available = values.get("MemAvailable")
+        if total is None:
+            return None
+        if available is None:
+            available = values.get("MemFree", 0) + values.get("Buffers", 0) + values.get("Cached", 0)
+        used = max(0, total - available)
+        return {"total": int(total), "used": int(used), "available": int(available)}
+    except Exception:
+        return None
+
+
+def _read_linux_network_bytes() -> tuple[int, int] | None:
+    try:
+        rx_total = 0
+        tx_total = 0
+        with open("/proc/net/dev", "r", encoding="utf-8") as fh:
+            for raw in fh.readlines()[2:]:
+                if ":" not in raw:
+                    continue
+                iface, data = raw.split(":", 1)
+                iface = iface.strip()
+                if iface == "lo":
+                    continue
+                fields = data.split()
+                if len(fields) < 16:
+                    continue
+                rx_total += int(fields[0])
+                tx_total += int(fields[8])
+        return rx_total, tx_total
+    except Exception:
+        return None
+
+
+def _network_rates_bps() -> tuple[float | None, float | None]:
+    now_ts = time.time()
+    counters = _read_linux_network_bytes()
+    if not counters:
+        return None, None
+    rx_now, tx_now = counters
+    with MONITOR_STATE_LOCK:
+        prev_rx = MONITOR_NET_STATE["rx"]
+        prev_tx = MONITOR_NET_STATE["tx"]
+        prev_ts = MONITOR_NET_STATE["ts"]
+        MONITOR_NET_STATE.update({"rx": rx_now, "tx": tx_now, "ts": now_ts})
+    if prev_rx is None or prev_tx is None or prev_ts is None:
+        return None, None
+    delta_t = now_ts - float(prev_ts)
+    if delta_t <= 0:
+        return None, None
+    rx_rate = max(0.0, (rx_now - int(prev_rx)) / delta_t)
+    tx_rate = max(0.0, (tx_now - int(prev_tx)) / delta_t)
+    return rx_rate, tx_rate
+
+
+def _read_linux_uptime_seconds() -> int | None:
+    try:
+        with open("/proc/uptime", "r", encoding="utf-8") as fh:
+            token = fh.read().split()[0]
+        return int(float(token))
+    except Exception:
+        return None
+
+
+def collect_monitor_payload() -> dict[str, object]:
+    now_dt = datetime.now()
+    cpu_percent = _cpu_percent()
+    if cpu_percent is None and hasattr(os, "getloadavg"):
+        try:
+            load_1m = os.getloadavg()[0]
+            cpu_count = max(1, int(os.cpu_count() or 1))
+            cpu_percent = round(max(0.0, min(100.0, (load_1m / cpu_count) * 100.0)), 2)
+        except Exception:
+            cpu_percent = None
+    mem = _memory_stats_bytes() or {}
+    rx_bps, tx_bps = _network_rates_bps()
+    app_uptime_seconds = int(max(0.0, (now_dt - APP_STARTED_AT).total_seconds()))
+    return {
+        "app_time_iso": now_dt.isoformat(),
+        "app_time_text": now_dt.strftime("%d.%m.%Y %H:%M:%S"),
+        "app_uptime_seconds": app_uptime_seconds,
+        "server_uptime_seconds": _read_linux_uptime_seconds(),
+        "cpu_percent": cpu_percent,
+        "cpu_count": int(os.cpu_count() or 1),
+        "memory_total_bytes": mem.get("total"),
+        "memory_used_bytes": mem.get("used"),
+        "memory_available_bytes": mem.get("available"),
+        "network_rx_bps": rx_bps,
+        "network_tx_bps": tx_bps,
+        "platform": platform.platform(),
     }
 
 
@@ -1433,14 +1640,22 @@ def admin_dashboard():
                         if failed:
                             flash(f"Не удалось удалить преподавателей: {', '.join(str(v) for v in failed)}.", "error")
                 elif action == "create_user":
+
                     username, full_name, password = request.form.get("username", "").strip(), request.form.get("full_name", "").strip(), request.form.get("password", "")
                     preferred_group_id, is_admin = request.form.get("preferred_group_id") or None, request.form.get("is_admin") == "on"
                     if username and password:
-                        cur.execute("INSERT INTO site_users(username, password_hash, full_name, preferred_group_id) VALUES (%s, %s, %s, %s) RETURNING id", (username, generate_password_hash(password), full_name or None, preferred_group_id))
-                        new_user_id = cur.fetchone()[0]
-                        if is_admin:
-                            cur.execute("INSERT INTO site_admins(user_id) VALUES (%s) ON CONFLICT (user_id) DO NOTHING", (new_user_id,))
-                        flash("Пользователь создан.", "success")
+                        cur.execute("SELECT 1 FROM site_users WHERE lower(username) = lower(%s) LIMIT 1", (username,))
+                        if cur.fetchone():
+                            flash("Пользователь с таким логином уже существует.", "error")
+                        else:
+                            cur.execute("INSERT INTO site_users(username, password_hash, full_name, preferred_group_id) VALUES (%s, %s, %s, %s) RETURNING id", (username, generate_password_hash(password), full_name or None, preferred_group_id))
+                            new_user_id = cur.fetchone()[0]
+                            if is_admin:
+                                cur.execute("INSERT INTO site_admins(user_id) VALUES (%s) ON CONFLICT (user_id) DO NOTHING", (new_user_id,))
+                            flash("Пользователь создан.", "success")
+                    else:
+                        flash("Укажите логин и пароль.", "error")
+
                 elif action == "toggle_admin":
                     uid, make_admin = request.form.get("target_user_id"), request.form.get("make_admin") == "1"
                     if uid:
@@ -1482,13 +1697,17 @@ def admin_dashboard():
                             flash("Текущий авторизованный пользователь не был удален.", "error")
                 elif action == "create_schedule":
 
+
                     vals = [(request.form.get(k) or "").strip() for k in ("lesson_date", "start_time", "end_time", "subject_id", "teacher_id", "group_id")]
                     if all(vals):
                         try:
                             cur.execute("INSERT INTO schedule_entries(lesson_date, start_time, end_time, subject_id, teacher_id, group_id, created_by_user_id) VALUES (%s, %s, %s, %s, %s, %s, %s)", tuple(vals) + (session["user_id"],))
                             conn.commit()
-                            detect_and_record_schedule_changes([int(vals[5])])
                             flash("Занятие добавлено в ручное расписание.", "success")
+                            try:
+                                detect_and_record_schedule_changes([int(vals[5])])
+                            except Exception as exc:
+                                flash(f"Занятие сохранено, но не удалось обновить ленту изменений: {exc}", "error")
                         except Exception:
                             flash("Не удалось добавить занятие (проверьте корректность и существующие связи).", "error")
                     else:
@@ -1501,10 +1720,14 @@ def admin_dashboard():
                         cur.execute("DELETE FROM schedule_entries WHERE id = %s", (entry_id,))
                         if cur.rowcount and group_row:
                             conn.commit()
-                            detect_and_record_schedule_changes([int(group_row[0])])
+                            try:
+                                detect_and_record_schedule_changes([int(group_row[0])])
+                            except Exception as exc:
+                                flash(f"Запись удалена, но не удалось обновить ленту изменений: {exc}", "error")
                         flash("Запись занятия удалена." if cur.rowcount else "Запись с таким ID не найдена.", "success" if cur.rowcount else "error")
                     else:
                         flash("Укажите корректный числовой ID занятия.", "error")
+
                 elif action == "save_telegram_settings":
                     try:
                         save_telegram_settings(
@@ -1647,6 +1870,47 @@ def admin_dashboard():
     )
 
 
+@app.route("/admin/monitor")
+@admin_required
+def admin_monitor():
+    metrics = collect_monitor_payload()
+    online_users = 0
+    online_error = ""
+    try:
+        online_users = count_online_users()
+    except Exception as exc:
+        online_error = str(exc)
+    return render_template(
+        "admin_monitor.html",
+        title="Мониторинг",
+        metrics=metrics,
+        online_users=online_users,
+        online_window_minutes=ONLINE_USERS_WINDOW_MINUTES,
+        online_error=online_error,
+    )
+
+
+@app.route("/admin/monitor/status")
+@admin_required
+def admin_monitor_status():
+    metrics = collect_monitor_payload()
+    online_users = 0
+    online_error = ""
+    try:
+        online_users = count_online_users()
+    except Exception as exc:
+        online_error = str(exc)
+    return jsonify(
+        {
+            "ok": True,
+            "metrics": metrics,
+            "online_users": online_users,
+            "online_window_minutes": ONLINE_USERS_WINDOW_MINUTES,
+            "online_error": online_error,
+        }
+    )
+
+
 @app.route("/admin/parser-status")
 @admin_required
 def admin_parser_status():
@@ -1661,21 +1925,37 @@ def admin_planshetka_status():
     return jsonify({"summary": state["summary"], "log_lines": state["log_lines"], "is_running": state["is_running"], "failed_files": state["failed_files"], "scanned_files": state["scanned_files"], "last_run_at": state["last_run_at"].strftime("%Y-%m-%d %H:%M:%S") if state["last_run_at"] else ""})
 
 
-ensure_auto_schedule_table()
-ensure_planshetka_tables()
-ensure_runtime_state_table()
-ensure_personalization_tables()
-ensure_bot_tables()
-llm_ok, llm_err = ensure_llm_ready()
-if not llm_ok:
-    print(f"[WARN] AI storage init failed: {llm_err}")
-repair_runtime_state_encoding()
-reset_runtime_state_flags()
-detect_and_record_schedule_changes()
+def initialize_app_runtime() -> None:
+    init_steps = [
+        ("auto schedule", ensure_auto_schedule_table),
+        ("planshetka tables", ensure_planshetka_tables),
+        ("runtime state", ensure_runtime_state_table),
+        ("personalization", ensure_personalization_tables),
+        ("bot tables", ensure_bot_tables),
+        ("monitoring tables", ensure_monitoring_tables),
+        ("runtime state encoding", repair_runtime_state_encoding),
+        ("runtime state flags", reset_runtime_state_flags),
+        ("change feed bootstrap", detect_and_record_schedule_changes),
+    ]
+    for label, fn in init_steps:
+        try:
+            fn()
+        except Exception as exc:
+            print(f"[WARN] init '{label}' failed: {exc}")
 
-if should_start_background_threads():
-    Thread(target=telegram_polling_worker, daemon=True).start()
-    Thread(target=telegram_notification_worker, daemon=True).start()
+    try:
+        llm_ok, llm_err = ensure_llm_ready()
+        if not llm_ok:
+            print(f"[WARN] AI storage init failed: {llm_err}")
+    except Exception as exc:
+        print(f"[WARN] AI storage init failed: {exc}")
+
+    if should_start_background_threads():
+        Thread(target=telegram_polling_worker, daemon=True).start()
+        Thread(target=telegram_notification_worker, daemon=True).start()
+
+
+initialize_app_runtime()
 
 
 if __name__ == "__main__":
