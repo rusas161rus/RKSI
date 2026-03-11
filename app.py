@@ -282,20 +282,26 @@ def load_user(user_id: int):
 def ensure_monitoring_tables() -> None:
     with get_main_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS online_user_presence (
-                    user_id BIGINT PRIMARY KEY REFERENCES site_users(id) ON DELETE CASCADE,
-                    last_seen TIMESTAMPTZ NOT NULL DEFAULT now()
+            # Serialize DDL across Gunicorn workers to avoid concurrent CREATE TABLE race.
+            lock_key = 741003119
+            cur.execute("SELECT pg_advisory_lock(%s)", (lock_key,))
+            try:
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS online_user_presence (
+                        user_id BIGINT PRIMARY KEY REFERENCES site_users(id) ON DELETE CASCADE,
+                        last_seen TIMESTAMPTZ NOT NULL DEFAULT now()
+                    )
+                    """
                 )
-                """
-            )
-            cur.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_online_user_presence_last_seen
-                ON online_user_presence(last_seen DESC)
-                """
-            )
+                cur.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_online_user_presence_last_seen
+                    ON online_user_presence(last_seen DESC)
+                    """
+                )
+            finally:
+                cur.execute("SELECT pg_advisory_unlock(%s)", (lock_key,))
 
 
 def touch_user_presence(user_id: int) -> None:
