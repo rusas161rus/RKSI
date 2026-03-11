@@ -213,18 +213,6 @@
 </div>
 
 <section class="card">
-  <div class="action-row schedule-links" style="margin-bottom: 0.8rem;">
-    <form method="get" action="{{ planshetka_folder_url }}" target="_blank" rel="noopener noreferrer" class="grid-form compact-form">
-      <button type="submit" {% if not planshetka_folder_url %}disabled{% endif %}>Открыть папку Planshetka</button>
-    </form>
-    <form method="get" action="{{ rksi_schedule_url }}" target="_blank" rel="noopener noreferrer" class="grid-form compact-form">
-      <button type="submit">Открыть расписание РКСИ</button>
-    </form>
-    <form method="get" action="{{ rksi_mobile_schedule_url }}" target="_blank" rel="noopener noreferrer" class="grid-form compact-form">
-      <button type="submit">Открыть мобильную версию РКСИ</button>
-    </form>
-  </div>
-
   <h3>Расхождения источников</h3>
   {% if source_conflicts %}
     <div class="mini-list">
@@ -242,6 +230,18 @@
 </section>
 
 <section class="card">
+  <div class="action-row schedule-links" style="margin-bottom: 0.8rem;">
+    <form method="get" action="{{ planshetka_folder_url }}" target="_blank" rel="noopener noreferrer" class="grid-form compact-form">
+      <button type="submit" {% if not planshetka_folder_url %}disabled{% endif %}>Открыть папку Planshetka</button>
+    </form>
+    <form method="get" action="{{ rksi_schedule_url }}" target="_blank" rel="noopener noreferrer" class="grid-form compact-form">
+      <button type="submit">Открыть расписание РКСИ</button>
+    </form>
+    <form method="get" action="{{ rksi_mobile_schedule_url }}" target="_blank" rel="noopener noreferrer" class="grid-form compact-form">
+      <button type="submit">Открыть мобильную версию РКСИ</button>
+    </form>
+  </div>
+
   <h2>Расписание</h2>
   <p class="meta">Переключить источник:</p>
   <div class="action-row source-switch" style="margin-bottom: 0.8rem;">
