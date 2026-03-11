@@ -222,6 +222,21 @@ button.danger { background: #c33; }
   min-height: 3rem;
 }
 
+.card--telegram .telegram-actions .compact-form button,
+.card--telegram .telegram-settings-form button {
+  min-height: 2.4rem;
+  padding: 0.4rem 0.55rem;
+}
+
+.card--telegram .telegram-settings-form {
+  margin-top: 0.75rem;
+  gap: 0.55rem;
+}
+
+.card--telegram .telegram-settings-form label {
+  font-size: 0.95rem;
+}
+
 .inline-action-form {
   grid-template-columns: minmax(260px, 1fr) minmax(180px, 260px);
   align-items: end;

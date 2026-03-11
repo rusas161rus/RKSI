@@ -45,7 +45,7 @@
     </form>
   </section>
 
-  <section class="card dashboard-widget dashboard-widget--quarter" data-widget-id="telegram" data-widget-title="Привязка Telegram" data-default-size="quarter">
+  <section class="card card--telegram dashboard-widget dashboard-widget--quarter" data-widget-id="telegram" data-widget-title="Привязка Telegram" data-default-size="quarter">
     <h3>Привязка Telegram</h3>
     <p class="meta">{% if user.telegram_chat_id %}Аккаунт привязан к chat id {{ user.telegram_chat_id }}.{% else %}Привяжите Telegram, чтобы получить доступ к боту и уведомлениям.{% endif %}</p>
     {% if telegram_bot_url %}<p><a href="{{ telegram_bot_url }}" target="_blank" rel="noopener noreferrer">Открыть бота</a></p>{% endif %}
@@ -53,7 +53,7 @@
       <p><strong>Активный код:</strong> <code>{{ user.telegram_link_code }}</code></p>
       <p class="meta">Код действует 30 минут. Отправьте его боту одним сообщением.</p>
     {% endif %}
-    <div class="action-row">
+    <div class="action-row telegram-actions">
       <form method="post" class="grid-form compact-form">
         {{ preserve_filters() }}
         <button type="submit" name="profile_action" value="generate_telegram_code">Сгенерировать код</button>
@@ -65,10 +65,11 @@
       </form>
       {% endif %}
     </div>
-    <form method="post" class="grid-form compact-form" style="margin-top: 0.8rem;">
+    <form method="post" class="grid-form compact-form telegram-settings-form">
       {{ preserve_filters() }}
       <input type="hidden" name="profile_action" value="save_telegram_notifications" />
       <label class="inline-check"><input type="checkbox" name="telegram_notifications_enabled" value="1" {% if user.telegram_notifications_enabled %}checked{% endif %} /> Получать Telegram-уведомления об изменениях</label>
+      <label class="inline-check"><input type="checkbox" name="telegram_lesson_notifications_enabled" value="1" {% if user.telegram_lesson_notifications_enabled %}checked{% endif %} /> Получать уведомления о занятиях</label>
       <button type="submit">Сохранить настройки Telegram</button>
     </form>
   </section>

@@ -203,7 +203,7 @@ def load_user(user_id: int):
             cur.execute("""
                 SELECT u.id, u.username, u.full_name, u.preferred_group_id,
                        u.telegram_chat_id, u.telegram_link_code, u.telegram_link_code_created_at,
-                       u.telegram_notifications_enabled, u.telegram_linked_at,
+                       u.telegram_notifications_enabled, u.telegram_lesson_notifications_enabled, u.telegram_linked_at,
                        EXISTS(SELECT 1 FROM site_admins a WHERE a.user_id = u.id) AS is_admin
                 FROM site_users u
                 WHERE u.id = %s AND u.is_active = TRUE
@@ -220,8 +220,9 @@ def load_user(user_id: int):
         "telegram_link_code": row[5],
         "telegram_link_code_created_at": row[6],
         "telegram_notifications_enabled": row[7],
-        "telegram_linked_at": row[8],
-        "is_admin": row[9],
+        "telegram_lesson_notifications_enabled": row[8],
+        "telegram_linked_at": row[9],
+        "is_admin": row[10],
     }
 
 
@@ -769,10 +770,20 @@ def me():
             flash("Telegram-аккаунт отвязан.", "success")
             return redirect_me_after_post()
         if action == "save_telegram_notifications":
-            enabled = request.form.get("telegram_notifications_enabled") == "1"
+            changes_enabled = request.form.get("telegram_notifications_enabled") == "1"
+            lesson_enabled = request.form.get("telegram_lesson_notifications_enabled") == "1"
             with get_main_conn() as conn:
                 with conn.cursor() as cur:
-                    cur.execute("UPDATE site_users SET telegram_notifications_enabled = %s, updated_at = now() WHERE id = %s", (enabled, user["id"]))
+                    cur.execute(
+                        """
+                        UPDATE site_users
+                        SET telegram_notifications_enabled = %s,
+                            telegram_lesson_notifications_enabled = %s,
+                            updated_at = now()
+                        WHERE id = %s
+                        """,
+                        (changes_enabled, lesson_enabled, user["id"]),
+                    )
             flash("Настройки Telegram-уведомлений сохранены.", "success")
             return redirect_me_after_post()
         flash("Неизвестное действие личного кабинета.", "error")

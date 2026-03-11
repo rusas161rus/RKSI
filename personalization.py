@@ -16,6 +16,8 @@ CHANGE_LOOKAHEAD_DAYS = 21
 MAX_EVENTS_PER_REFRESH = 16
 TELEGRAM_POLL_LOCK_ID = 812341
 TELEGRAM_NOTIFY_LOCK_ID = 812342
+LESSON_REMINDER_WINDOW_MINUTES = 15
+LESSON_SOURCE_PRIORITY = {"rksi": 0, "planshetka": 1, "manual": 2}
 
 
 def ensure_personalization_tables() -> None:
@@ -25,6 +27,7 @@ def ensure_personalization_tables() -> None:
             cur.execute("ALTER TABLE IF EXISTS site_users ADD COLUMN IF NOT EXISTS telegram_link_code VARCHAR(32)")
             cur.execute("ALTER TABLE IF EXISTS site_users ADD COLUMN IF NOT EXISTS telegram_link_code_created_at TIMESTAMPTZ")
             cur.execute("ALTER TABLE IF EXISTS site_users ADD COLUMN IF NOT EXISTS telegram_notifications_enabled BOOLEAN NOT NULL DEFAULT TRUE")
+            cur.execute("ALTER TABLE IF EXISTS site_users ADD COLUMN IF NOT EXISTS telegram_lesson_notifications_enabled BOOLEAN NOT NULL DEFAULT FALSE")
             cur.execute("ALTER TABLE IF EXISTS site_users ADD COLUMN IF NOT EXISTS telegram_linked_at TIMESTAMPTZ")
             cur.execute(
                 """
@@ -118,6 +121,19 @@ def ensure_bot_tables() -> None:
                     delivered_at TIMESTAMPTZ,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                     PRIMARY KEY (user_id, event_id)
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS telegram_lesson_reminder_deliveries (
+                    user_id BIGINT NOT NULL,
+                    reminder_key VARCHAR(128) NOT NULL,
+                    status VARCHAR(16) NOT NULL DEFAULT 'pending',
+                    error_text TEXT,
+                    delivered_at TIMESTAMPTZ,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    PRIMARY KEY (user_id, reminder_key)
                 )
                 """
             )
@@ -937,6 +953,125 @@ def _mark_delivery(user_id: int, event_id: int, status: str, error_text: str | N
             )
 
 
+def _build_lesson_reminder_key(lesson: dict[str, Any]) -> str:
+    payload = "|".join(
+        [
+            lesson["source"],
+            lesson["lesson_date"].isoformat(),
+            lesson["start_time"].strftime("%H:%M") if lesson.get("start_time") else "",
+            lesson.get("subject_name", ""),
+            lesson.get("teacher_name", ""),
+            lesson.get("room", ""),
+        ]
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _claim_lesson_reminder_delivery(user_id: int, reminder_key: str) -> bool:
+    ensure_bot_tables()
+    with get_bot_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO telegram_lesson_reminder_deliveries(user_id, reminder_key, status)
+                VALUES (%s, %s, 'pending')
+                ON CONFLICT (user_id, reminder_key) DO NOTHING
+                """,
+                (user_id, reminder_key),
+            )
+            return cur.rowcount > 0
+
+
+def _mark_lesson_reminder_delivery(user_id: int, reminder_key: str, status: str, error_text: str | None = None) -> None:
+    ensure_bot_tables()
+    with get_bot_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE telegram_lesson_reminder_deliveries
+                SET status = %s,
+                    error_text = %s,
+                    delivered_at = CASE WHEN %s = 'sent' THEN now() ELSE delivered_at END
+                WHERE user_id = %s AND reminder_key = %s
+                """,
+                (status, error_text, status, user_id, reminder_key),
+            )
+
+
+def _format_next_lesson_message(lesson: dict[str, Any]) -> str:
+    if lesson.get("start_time") and lesson.get("end_time"):
+        time_text = f"{lesson['start_time'].strftime('%H:%M')}-{lesson['end_time'].strftime('%H:%M')}"
+    elif lesson.get("start_time"):
+        time_text = lesson["start_time"].strftime("%H:%M")
+    else:
+        time_text = "без времени"
+    lines = [
+        "Следующая пара",
+        f"• {time_text}",
+        f"  {lesson['subject_name']}",
+    ]
+    details: list[str] = []
+    if lesson.get("teacher_name"):
+        details.append(lesson["teacher_name"])
+    if lesson.get("room"):
+        details.append(f"ауд. {lesson['room']}")
+    if details:
+        lines.append(f"  {' | '.join(details)}")
+    lines.append(f"  Источник: {SOURCE_TITLES.get(lesson['source'], lesson['source'])}")
+    return "\n".join(lines)
+
+
+def send_upcoming_lesson_reminders_once(settings: dict[str, Any]) -> int:
+    if not settings.get("bot_token") or not settings.get("notifications_enabled"):
+        return 0
+
+    now_dt = datetime.now()
+    window_end = now_dt + timedelta(minutes=LESSON_REMINDER_WINDOW_MINUTES)
+    today = now_dt.date()
+    tomorrow = today + timedelta(days=1)
+
+    with get_main_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, telegram_chat_id, preferred_group_id
+                FROM site_users
+                WHERE telegram_chat_id IS NOT NULL
+                  AND telegram_lesson_notifications_enabled = TRUE
+                  AND is_active = TRUE
+                """
+            )
+            users = cur.fetchall()
+
+    sent_count = 0
+    for user_id, chat_id, group_id in users:
+        if not group_id:
+            continue
+        rows = fetch_user_schedule(group_id, today, tomorrow)
+        candidates: list[tuple[datetime, dict[str, Any]]] = []
+        for row in rows:
+            if not row.get("start_time"):
+                continue
+            start_dt = datetime.combine(row["lesson_date"], row["start_time"])
+            if now_dt < start_dt <= window_end:
+                candidates.append((start_dt, row))
+        if not candidates:
+            continue
+
+        candidates.sort(key=lambda item: (item[0], LESSON_SOURCE_PRIORITY.get(item[1]["source"], 99), item[1]["subject_name"].lower()))
+        next_lesson = candidates[0][1]
+        reminder_key = _build_lesson_reminder_key(next_lesson)
+        if not _claim_lesson_reminder_delivery(user_id, reminder_key):
+            continue
+        try:
+            _send_telegram_message(settings, int(chat_id), _format_next_lesson_message(next_lesson), linked=True)
+            _mark_lesson_reminder_delivery(user_id, reminder_key, "sent")
+            sent_count += 1
+        except Exception as exc:
+            _mark_lesson_reminder_delivery(user_id, reminder_key, "failed", str(exc)[:500])
+    return sent_count
+
+
 def send_pending_notifications_once(settings: dict[str, Any]) -> int:
     if not settings.get("bot_token") or not settings.get("notifications_enabled"):
         return 0
@@ -1025,6 +1160,7 @@ def telegram_notification_worker() -> None:
             settings = load_telegram_settings()
             if settings.get("notifications_enabled") and settings.get("bot_token"):
                 send_pending_notifications_once(settings)
+                send_upcoming_lesson_reminders_once(settings)
             time.sleep(20)
 
     _service_lock_loop(TELEGRAM_NOTIFY_LOCK_ID, worker)
