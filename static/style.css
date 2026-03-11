@@ -516,41 +516,6 @@ th, td {
   }
 }
 
-.dashboard-hero {
-  display: flex;
-  gap: 1rem;
-  justify-content: space-between;
-  align-items: start;
-}
-
-.hero-stats {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(120px, 1fr));
-  gap: 0.75rem;
-  min-width: min(100%, 420px);
-}
-
-.hero-stat {
-  padding: 0.85rem;
-  border: 1px solid var(--card-border);
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--primary) 8%, var(--card-bg));
-}
-
-.hero-stat strong {
-  display: block;
-  margin: 0.2rem 0;
-  font-size: 1.1rem;
-}
-
-.hero-stat__label {
-  display: block;
-  font-size: 0.82rem;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--muted);
-}
-
 .profile-grid,
 .dashboard-grid {
   display: grid;
@@ -655,13 +620,8 @@ th, td {
 
 @media (max-width: 1100px) {
   .profile-grid,
-  .dashboard-grid,
-  .hero-stats {
+  .dashboard-grid {
     grid-template-columns: 1fr;
-  }
-
-  .dashboard-hero {
-    flex-direction: column;
   }
 
   .notes-form {

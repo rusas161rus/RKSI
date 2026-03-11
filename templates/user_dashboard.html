@@ -8,31 +8,6 @@
 <input type="hidden" name="all_groups" value="{{ 1 if all_groups else 0 }}" />
 {%- endmacro %}
 {% block content %}
-<section class="card dashboard-hero">
-  <div>
-    <h2>Личный кабинет</h2>
-    <p><strong>Пользователь:</strong> {{ user.full_name or user.username }}</p>
-    {% if group_name %}<p class="meta">Основная группа: {{ group_name }}</p>{% else %}<p class="meta">Группа пока не выбрана.</p>{% endif %}
-  </div>
-  <div class="hero-stats">
-    <div class="hero-stat">
-      <span class="hero-stat__label">Сегодня</span>
-      <strong>{{ today_summary.today_count }}</strong>
-      <span class="meta">занятий в системе</span>
-    </div>
-    <div class="hero-stat">
-      <span class="hero-stat__label">Изменения</span>
-      <strong>{{ change_events|length }}</strong>
-      <span class="meta">свежих событий</span>
-    </div>
-    <div class="hero-stat">
-      <span class="hero-stat__label">Telegram</span>
-      <strong>{% if user.telegram_chat_id %}подключен{% else %}не подключен{% endif %}</strong>
-      <span class="meta">бот и уведомления</span>
-    </div>
-  </div>
-</section>
-
 <div class="profile-grid">
   <section class="card">
     <h3>Личный кабинет</h3>
