@@ -8,8 +8,17 @@
 <input type="hidden" name="all_groups" value="{{ 1 if all_groups else 0 }}" />
 {%- endmacro %}
 {% block content %}
-<div class="profile-grid profile-grid--top">
-  <section class="card">
+<section class="card dashboard-layout-controls">
+  <div class="dashboard-layout-controls__head">
+    <h3>Настройка блоков кабинета</h3>
+    <button type="button" id="dashboardLayoutReset">Сбросить настройки</button>
+  </div>
+  <p class="meta">Включайте и отключайте блоки, задавайте размер и меняйте порядок кнопками "Выше"/"Ниже". Настройки сохраняются в браузере.</p>
+  <div id="dashboardWidgetList" class="layout-widget-list"></div>
+</section>
+
+<div id="dashboardLayout" class="dashboard-layout">
+  <section class="card dashboard-widget dashboard-widget--half" data-widget-id="profile" data-widget-title="Личный кабинет" data-default-size="half">
     <h3>Личный кабинет</h3>
     <p><strong>Пользователь:</strong> {{ user.full_name or user.username }}</p>
     {% if group_name %}<p class="meta">Основная группа: {{ group_name }}</p>{% else %}<p class="meta">Группа пока не выбрана.</p>{% endif %}
@@ -45,7 +54,7 @@
     </form>
   </section>
 
-  <section class="card">
+  <section class="card dashboard-widget dashboard-widget--quarter" data-widget-id="telegram" data-widget-title="Привязка Telegram" data-default-size="quarter">
     <h3>Привязка Telegram</h3>
     <p class="meta">{% if user.telegram_chat_id %}Аккаунт привязан к chat id {{ user.telegram_chat_id }}.{% else %}Привяжите Telegram, чтобы получить доступ к боту и уведомлениям.{% endif %}</p>
     {% if telegram_bot_url %}<p><a href="{{ telegram_bot_url }}" target="_blank" rel="noopener noreferrer">Открыть бота</a></p>{% endif %}
@@ -73,7 +82,7 @@
     </form>
   </section>
 
-  <section class="card card--favorites">
+  <section class="card card--favorites dashboard-widget dashboard-widget--quarter" data-widget-id="favorites" data-widget-title="Избранные преподаватели" data-default-size="quarter">
     <h3>Избранные преподаватели</h3>
     {% if favorite_teachers %}
       <div class="chip-list">
@@ -98,10 +107,7 @@
       <p class="meta">Пока пусто. Ниже в расписании можно добавлять преподавателей в избранное.</p>
     {% endif %}
   </section>
-</div>
-
-<div class="dashboard-grid dashboard-grid--paired">
-  <section class="card">
+  <section class="card dashboard-widget dashboard-widget--half" data-widget-id="announcements" data-widget-title="Объявления" data-default-size="half">
     <h3>Объявления</h3>
     {% if announcements %}
       <div class="mini-list">
@@ -118,7 +124,7 @@
     {% endif %}
   </section>
 
-  <section class="card">
+  <section class="card dashboard-widget dashboard-widget--half" data-widget-id="changes" data-widget-title="Лента изменений" data-default-size="half">
     <h3>Лента изменений</h3>
     {% if change_events %}
       <div class="mini-list">
@@ -133,10 +139,7 @@
       <p class="meta">Изменений по вашей группе пока не зафиксировано.</p>
     {% endif %}
   </section>
-</div>
-
-<div class="dashboard-grid dashboard-grid--paired">
-  <section class="card">
+  <section class="card dashboard-widget dashboard-widget--half" data-widget-id="today" data-widget-title="Сегодня" data-default-size="half">
     <h3>Сегодня</h3>
     {% if today_summary.next_lesson %}
       <p><strong>Следующая пара:</strong> {{ today_summary.next_lesson.subject_name }}</p>
@@ -163,7 +166,7 @@
     {% endif %}
   </section>
 
-  <section class="card">
+  <section class="card dashboard-widget dashboard-widget--half" data-widget-id="notes" data-widget-title="Мои заметки и дедлайны" data-default-size="half">
     <h3>Мои заметки и дедлайны</h3>
     <form method="post" class="grid-form notes-form">
       {{ preserve_filters() }}
@@ -209,10 +212,7 @@
       <p class="meta">Пока нет ни одной личной заметки.</p>
     {% endif %}
   </section>
-
-</div>
-
-<section class="card">
+  <section class="card dashboard-widget dashboard-widget--full" data-widget-id="conflicts" data-widget-title="Расхождения источников" data-default-size="full">
   <h3>Расхождения источников</h3>
   {% if source_conflicts %}
     <div class="mini-list">
@@ -229,7 +229,7 @@
   {% endif %}
 </section>
 
-<section class="card">
+  <section class="card dashboard-widget dashboard-widget--full" data-widget-id="schedule" data-widget-title="Расписание" data-default-size="full">
   <div class="action-row schedule-links" style="margin-bottom: 0.8rem;">
     <form method="get" action="{{ planshetka_folder_url }}" target="_blank" rel="noopener noreferrer" class="grid-form compact-form">
       <button type="submit" {% if not planshetka_folder_url %}disabled{% endif %}>Открыть папку Planshetka</button>
@@ -328,4 +328,210 @@
     <p>Выберите группу в личном кабинете или укажите преподавателя, чтобы увидеть расписание.</p>
   {% endif %}
 </section>
+</div>
+<script>
+  (function () {
+    var layout = document.getElementById('dashboardLayout');
+    var widgetList = document.getElementById('dashboardWidgetList');
+    var resetButton = document.getElementById('dashboardLayoutReset');
+    var storageKey = 'dashboard-layout-v2';
+    var sizeOptions = ['quarter', 'third', 'half', 'full'];
+
+    if (!layout || !widgetList) {
+      return;
+    }
+
+    var widgets = Array.prototype.slice.call(layout.querySelectorAll('.dashboard-widget'));
+    if (!widgets.length) {
+      return;
+    }
+
+    var widgetsById = {};
+    var defaultState = { order: [], hidden: {}, sizes: {} };
+    widgets.forEach(function (widget) {
+      var id = widget.dataset.widgetId;
+      if (!id) return;
+      widgetsById[id] = widget;
+      defaultState.order.push(id);
+      defaultState.hidden[id] = false;
+      defaultState.sizes[id] = sizeOptions.indexOf(widget.dataset.defaultSize) >= 0 ? widget.dataset.defaultSize : 'half';
+    });
+
+    function cloneState(source) {
+      return JSON.parse(JSON.stringify(source));
+    }
+
+    function sanitizeState(rawState) {
+      var state = cloneState(defaultState);
+      if (!rawState || typeof rawState !== 'object') {
+        return state;
+      }
+
+      if (Array.isArray(rawState.order)) {
+        var used = {};
+        state.order = rawState.order.filter(function (id) {
+          if (!widgetsById[id] || used[id]) return false;
+          used[id] = true;
+          return true;
+        });
+        defaultState.order.forEach(function (id) {
+          if (!used[id]) state.order.push(id);
+        });
+      }
+
+      if (rawState.hidden && typeof rawState.hidden === 'object') {
+        Object.keys(state.hidden).forEach(function (id) {
+          state.hidden[id] = Boolean(rawState.hidden[id]);
+        });
+      }
+
+      if (rawState.sizes && typeof rawState.sizes === 'object') {
+        Object.keys(state.sizes).forEach(function (id) {
+          if (sizeOptions.indexOf(rawState.sizes[id]) >= 0) {
+            state.sizes[id] = rawState.sizes[id];
+          }
+        });
+      }
+
+      return state;
+    }
+
+    function loadState() {
+      try {
+        var raw = localStorage.getItem(storageKey);
+        if (!raw) return cloneState(defaultState);
+        return sanitizeState(JSON.parse(raw));
+      } catch (err) {
+        return cloneState(defaultState);
+      }
+    }
+
+    function saveState(state) {
+      try {
+        localStorage.setItem(storageKey, JSON.stringify(state));
+      } catch (err) {
+        return;
+      }
+    }
+
+    function moveWidget(state, id, direction) {
+      var currentIndex = state.order.indexOf(id);
+      if (currentIndex < 0) return;
+      var nextIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
+      if (nextIndex < 0 || nextIndex >= state.order.length) return;
+      var nextId = state.order[nextIndex];
+      state.order[nextIndex] = id;
+      state.order[currentIndex] = nextId;
+    }
+
+    function applyWidgetState(widget, size, hidden) {
+      widget.classList.remove(
+        'dashboard-widget--quarter',
+        'dashboard-widget--third',
+        'dashboard-widget--half',
+        'dashboard-widget--full'
+      );
+      widget.classList.add('dashboard-widget--' + size);
+      widget.hidden = hidden;
+    }
+
+    function renderControls(state) {
+      widgetList.innerHTML = '';
+      state.order.forEach(function (id, index) {
+        var widget = widgetsById[id];
+        if (!widget) return;
+        var title = widget.dataset.widgetTitle || id;
+
+        var row = document.createElement('div');
+        row.className = 'layout-widget-row';
+
+        var toggleLabel = document.createElement('label');
+        toggleLabel.className = 'layout-widget-row__toggle';
+        var visibilityCheckbox = document.createElement('input');
+        visibilityCheckbox.type = 'checkbox';
+        visibilityCheckbox.checked = !state.hidden[id];
+        var visibilityText = document.createElement('span');
+        visibilityText.textContent = title;
+        toggleLabel.appendChild(visibilityCheckbox);
+        toggleLabel.appendChild(visibilityText);
+
+        var sizeSelect = document.createElement('select');
+        sizeSelect.className = 'layout-widget-row__size';
+        [
+          ['quarter', 'Компактный'],
+          ['third', 'Узкий'],
+          ['half', 'Средний'],
+          ['full', 'На всю ширину']
+        ].forEach(function (optionData) {
+          var option = document.createElement('option');
+          option.value = optionData[0];
+          option.textContent = optionData[1];
+          option.selected = state.sizes[id] === optionData[0];
+          sizeSelect.appendChild(option);
+        });
+
+        var actions = document.createElement('div');
+        actions.className = 'layout-widget-row__actions';
+        var upButton = document.createElement('button');
+        upButton.type = 'button';
+        upButton.textContent = 'Выше';
+        upButton.disabled = index === 0;
+        var downButton = document.createElement('button');
+        downButton.type = 'button';
+        downButton.textContent = 'Ниже';
+        downButton.disabled = index === state.order.length - 1;
+        actions.appendChild(upButton);
+        actions.appendChild(downButton);
+
+        row.appendChild(toggleLabel);
+        row.appendChild(sizeSelect);
+        row.appendChild(actions);
+        widgetList.appendChild(row);
+
+        visibilityCheckbox.addEventListener('change', function () {
+          state.hidden[id] = !visibilityCheckbox.checked;
+          applyWidgetState(widget, state.sizes[id], state.hidden[id]);
+          saveState(state);
+        });
+
+        sizeSelect.addEventListener('change', function () {
+          state.sizes[id] = sizeSelect.value;
+          applyWidgetState(widget, state.sizes[id], state.hidden[id]);
+          saveState(state);
+        });
+
+        upButton.addEventListener('click', function () {
+          moveWidget(state, id, 'up');
+          render(state);
+        });
+
+        downButton.addEventListener('click', function () {
+          moveWidget(state, id, 'down');
+          render(state);
+        });
+      });
+    }
+
+    function render(state) {
+      state.order.forEach(function (id) {
+        var widget = widgetsById[id];
+        if (!widget) return;
+        layout.appendChild(widget);
+        applyWidgetState(widget, state.sizes[id], state.hidden[id]);
+      });
+      renderControls(state);
+      saveState(state);
+    }
+
+    var currentState = loadState();
+    render(currentState);
+
+    if (resetButton) {
+      resetButton.addEventListener('click', function () {
+        currentState = cloneState(defaultState);
+        render(currentState);
+      });
+    }
+  })();
+</script>
 {% endblock %}
