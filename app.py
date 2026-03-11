@@ -11,6 +11,31 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from db import ensure_schedule_room_columns, get_main_conn, is_composite_teacher_name
+from personalization import (
+    build_today_summary,
+    create_announcement,
+    create_user_note,
+    delete_announcement,
+    delete_user_note,
+    detect_and_record_schedule_changes,
+    ensure_bot_tables,
+    ensure_personalization_tables,
+    fetch_admin_announcements,
+    fetch_announcements_for_user,
+    fetch_favorite_teachers,
+    fetch_recent_change_events_for_user,
+    fetch_source_conflicts,
+    fetch_user_notes,
+    generate_telegram_link_code,
+    load_telegram_settings,
+    save_telegram_settings,
+    telegram_notification_worker,
+    telegram_polling_worker,
+    toggle_announcement,
+    toggle_favorite_teacher,
+    toggle_user_note,
+    unlink_telegram_account,
+)
 from scripts.parse_and_sync import fetch_group_map, run as run_parser_group
 from scripts.parse_tabletka_sync import (
     clear_planshetka_data,
@@ -133,6 +158,13 @@ def build_days(start_day: date, end_day: date) -> list[date]:
     return [start_day + timedelta(days=i) for i in range((end_day - start_day).days + 1)]
 
 
+def should_start_background_threads() -> bool:
+    debug_mode = os.getenv("FLASK_DEBUG", "0").strip().lower() in {"1", "true", "yes"}
+    if debug_mode and os.getenv("WERKZEUG_RUN_MAIN") != "true":
+        return False
+    return True
+
+
 def login_required(view):
     @wraps(view)
     def wrapped(*args, **kwargs):
@@ -159,6 +191,8 @@ def load_user(user_id: int):
         with conn.cursor() as cur:
             cur.execute("""
                 SELECT u.id, u.username, u.full_name, u.preferred_group_id,
+                       u.telegram_chat_id, u.telegram_link_code, u.telegram_link_code_created_at,
+                       u.telegram_notifications_enabled, u.telegram_linked_at,
                        EXISTS(SELECT 1 FROM site_admins a WHERE a.user_id = u.id) AS is_admin
                 FROM site_users u
                 WHERE u.id = %s AND u.is_active = TRUE
@@ -166,7 +200,18 @@ def load_user(user_id: int):
             row = cur.fetchone()
     if not row:
         return None
-    return {"id": row[0], "username": row[1], "full_name": row[2], "preferred_group_id": row[3], "is_admin": row[4]}
+    return {
+        "id": row[0],
+        "username": row[1],
+        "full_name": row[2],
+        "preferred_group_id": row[3],
+        "telegram_chat_id": row[4],
+        "telegram_link_code": row[5],
+        "telegram_link_code_created_at": row[6],
+        "telegram_notifications_enabled": row[7],
+        "telegram_linked_at": row[8],
+        "is_admin": row[9],
+    }
 
 
 def ensure_auto_schedule_table() -> None:
@@ -495,6 +540,10 @@ def start_parser_job(group_names: list[str], mode_label: str) -> bool:
                     failed.append(group_name)
                     set_parser_state(append_line=f"[FAIL] {group_name}: {exc}")
         finally:
+            try:
+                detect_and_record_schedule_changes()
+            except Exception as exc:
+                set_parser_state(append_line=f"[WARN] Не удалось обновить ленту изменений: {exc}")
             set_parser_state(is_running=False, stop_requested=False, failed_groups=failed, last_run_at=datetime.now(), summary=f"Завершено: успешно {done}, ошибок {len(failed)}")
 
     Thread(target=worker, daemon=True).start()
@@ -520,6 +569,10 @@ def start_planshetka_job(folder_url: str, recent_files_limit: int, mode_label: s
             set_planshetka_state(append_line=message)
         try:
             imported, failed_files, scanned_files = run_planshetka_sync(folder_url, replace_group=True, recent_files_limit=recent_files_limit, log=log)
+            try:
+                detect_and_record_schedule_changes()
+            except Exception as exc:
+                set_planshetka_state(append_line=f"[WARN] Не удалось обновить ленту изменений: {exc}")
             set_planshetka_state(summary=f"Завершено: импортировано {imported}, ошибок файлов {failed_files}", failed_files=failed_files, scanned_files=scanned_files, last_run_at=datetime.now(), is_running=False)
         except Exception as exc:
             set_planshetka_state(summary=f"Ошибка Planshetka: {exc}", last_run_at=datetime.now(), is_running=False, append_line=f"[FAIL] {exc}")
@@ -621,28 +674,87 @@ def cookie_policy():
 @login_required
 def me():
     ensure_schedule_room_columns()
+    ensure_personalization_tables()
     user = load_user(session["user_id"])
     if not user:
         session.clear()
         return redirect(url_for("login"))
+
+    def redirect_me_after_post():
+        return redirect(
+            url_for(
+                "me",
+                date=request.form.get("date"),
+                period=request.form.get("period"),
+                q=request.form.get("q"),
+                source=request.form.get("source") or "rksi",
+                teacher_id=request.form.get("teacher_id"),
+                all_groups=1 if request.form.get("all_groups") == "1" else 0,
+            )
+        )
+
     if request.method == "POST":
         action = request.form.get("profile_action") or "apply"
-        preferred_group_id = (request.form.get("preferred_group_id") or "").strip() or None
-        if action == "reset_search":
-            preferred_group_id = None
-        with get_main_conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute("UPDATE site_users SET preferred_group_id = %s, updated_at = now() WHERE id = %s", (preferred_group_id, user["id"]))
-        if action == "reset_search":
-            return redirect(
-                url_for(
-                    "me",
-                    date=request.form.get("date"),
-                    period=request.form.get("period"),
-                    source=request.form.get("source") or "rksi",
-                )
-            )
-        return redirect(url_for("me", date=request.form.get("date"), period=request.form.get("period"), q=request.form.get("q"), source=request.form.get("source") or "rksi", teacher_id=request.form.get("teacher_id"), all_groups=1 if request.form.get("all_groups") == "1" else 0))
+        if action in {"apply", "reset_search"}:
+            preferred_group_id = (request.form.get("preferred_group_id") or "").strip() or None
+            if action == "reset_search":
+                preferred_group_id = None
+            with get_main_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("UPDATE site_users SET preferred_group_id = %s, updated_at = now() WHERE id = %s", (preferred_group_id, user["id"]))
+            if action == "reset_search":
+                return redirect(url_for("me", date=request.form.get("date"), period=request.form.get("period"), source=request.form.get("source") or "rksi"))
+            return redirect_me_after_post()
+        if action == "toggle_favorite_teacher":
+            teacher_id = (request.form.get("favorite_teacher_id") or "").strip()
+            if teacher_id.isdigit():
+                is_favorite = toggle_favorite_teacher(user["id"], int(teacher_id))
+                flash("Преподаватель добавлен в избранное." if is_favorite else "Преподаватель удален из избранного.", "success")
+            else:
+                flash("Некорректный преподаватель для избранного.", "error")
+            return redirect_me_after_post()
+        if action == "create_note":
+            title = (request.form.get("note_title") or "").strip()
+            if not title:
+                flash("Укажите заголовок заметки.", "error")
+            else:
+                try:
+                    create_user_note(user["id"], title, request.form.get("note_text", ""), request.form.get("note_due_date"))
+                    flash("Заметка добавлена.", "success")
+                except Exception as exc:
+                    flash(f"Не удалось сохранить заметку: {exc}", "error")
+            return redirect_me_after_post()
+        if action == "toggle_note_done":
+            note_id = (request.form.get("note_id") or "").strip()
+            if note_id.isdigit() and toggle_user_note(user["id"], int(note_id)):
+                flash("Статус заметки обновлен.", "success")
+            else:
+                flash("Заметка не найдена.", "error")
+            return redirect_me_after_post()
+        if action == "delete_note":
+            note_id = (request.form.get("note_id") or "").strip()
+            if note_id.isdigit() and delete_user_note(user["id"], int(note_id)):
+                flash("Заметка удалена.", "success")
+            else:
+                flash("Заметка не найдена.", "error")
+            return redirect_me_after_post()
+        if action == "generate_telegram_code":
+            code = generate_telegram_link_code(user["id"])
+            flash(f"Код для Telegram создан: {code}. Он действует 30 минут.", "success")
+            return redirect_me_after_post()
+        if action == "unlink_telegram":
+            unlink_telegram_account(user["id"])
+            flash("Telegram-аккаунт отвязан.", "success")
+            return redirect_me_after_post()
+        if action == "save_telegram_notifications":
+            enabled = request.form.get("telegram_notifications_enabled") == "1"
+            with get_main_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("UPDATE site_users SET telegram_notifications_enabled = %s, updated_at = now() WHERE id = %s", (enabled, user["id"]))
+            flash("Настройки Telegram-уведомлений сохранены.", "success")
+            return redirect_me_after_post()
+        flash("Неизвестное действие личного кабинета.", "error")
+        return redirect_me_after_post()
 
     selected_date = request.args.get("date")
     try:
@@ -741,6 +853,16 @@ def me():
     for row in schedule_rows:
         grouped.setdefault(row[1], []).append(row)
     schedule_days = [{"date": d, "header": format_day_header(d), "rows": grouped.get(d, [])} for d in days]
+    favorite_teachers = fetch_favorite_teachers(user["id"])
+    favorite_teacher_ids = {item["id"] for item in favorite_teachers}
+    notes = fetch_user_notes(user["id"])
+    announcements = fetch_announcements_for_user(user["id"])
+    change_events = fetch_recent_change_events_for_user(user["id"])
+    today_summary = build_today_summary(user["preferred_group_id"])
+    source_conflicts = fetch_source_conflicts(user["preferred_group_id"], start_day, end_day)
+    telegram_settings = load_telegram_settings()
+    telegram_bot_url = f"https://t.me/{telegram_settings['bot_username']}" if telegram_settings.get("bot_username") else ""
+    telegram_link_code_active = bool(user.get("telegram_link_code") and user.get("telegram_link_code_created_at") and user["telegram_link_code_created_at"] >= datetime.now(user["telegram_link_code_created_at"].tzinfo) - timedelta(minutes=30))
     return render_template(
         "user_dashboard.html",
         title="Личный кабинет",
@@ -760,6 +882,16 @@ def me():
         planshetka_folder_url=get_planshetka_folder_url(),
         rksi_schedule_url=RKSI_SCHEDULE_URL,
         rksi_mobile_schedule_url=RKSI_MOBILE_SCHEDULE_URL,
+        favorite_teachers=favorite_teachers,
+        favorite_teacher_ids=favorite_teacher_ids,
+        notes=notes,
+        announcements=announcements,
+        change_events=change_events,
+        today_summary=today_summary,
+        source_conflicts=source_conflicts,
+        telegram_settings=telegram_settings,
+        telegram_bot_url=telegram_bot_url,
+        telegram_link_code_active=telegram_link_code_active,
     )
 
 @app.route("/admin", methods=["GET", "POST"])
@@ -767,6 +899,7 @@ def me():
 def admin_dashboard():
     ensure_schedule_room_columns()
     ensure_planshetka_tables()
+    ensure_personalization_tables()
     action = request.form.get("action")
     admin_section = (request.values.get("section") or "overview").strip().lower()
     if admin_section not in {"overview", "dictionaries"}:
@@ -1018,6 +1151,8 @@ def admin_dashboard():
                     if all(vals):
                         try:
                             cur.execute("INSERT INTO schedule_entries(lesson_date, start_time, end_time, subject_id, teacher_id, group_id, created_by_user_id) VALUES (%s, %s, %s, %s, %s, %s, %s)", tuple(vals) + (session["user_id"],))
+                            conn.commit()
+                            detect_and_record_schedule_changes([int(vals[5])])
                             flash("Занятие добавлено в ручное расписание.", "success")
                         except Exception:
                             flash("Не удалось добавить занятие (проверьте корректность и существующие связи).", "error")
@@ -1026,10 +1161,48 @@ def admin_dashboard():
                 elif action in {"delete_schedule", "delete_schedule_by_id"}:
                     entry_id = (request.form.get("entry_id") or "").strip()
                     if entry_id.isdigit():
+                        cur.execute("SELECT group_id FROM schedule_entries WHERE id = %s", (entry_id,))
+                        group_row = cur.fetchone()
                         cur.execute("DELETE FROM schedule_entries WHERE id = %s", (entry_id,))
+                        if cur.rowcount and group_row:
+                            conn.commit()
+                            detect_and_record_schedule_changes([int(group_row[0])])
                         flash("Запись занятия удалена." if cur.rowcount else "Запись с таким ID не найдена.", "success" if cur.rowcount else "error")
                     else:
                         flash("Укажите корректный числовой ID занятия.", "error")
+                elif action == "save_telegram_settings":
+                    try:
+                        save_telegram_settings(
+                            request.form.get("telegram_bot_token", ""),
+                            request.form.get("telegram_bot_username", ""),
+                            request.form.get("site_base_url", ""),
+                            request.form.get("telegram_polling_enabled") == "1",
+                            request.form.get("telegram_notifications_enabled") == "1",
+                        )
+                        flash("Настройки Telegram-бота сохранены.", "success")
+                    except Exception as exc:
+                        flash(f"Не удалось сохранить настройки Telegram: {exc}", "error")
+                elif action == "create_announcement":
+                    title = (request.form.get("announcement_title") or "").strip()
+                    body = (request.form.get("announcement_body") or "").strip()
+                    group_id_raw = (request.form.get("announcement_group_id") or "").strip()
+                    if not title or not body:
+                        flash("Заполните заголовок и текст объявления.", "error")
+                    else:
+                        create_announcement(int(group_id_raw) if group_id_raw.isdigit() else None, title, body, int(session["user_id"]))
+                        flash("Объявление опубликовано.", "success")
+                elif action == "toggle_announcement":
+                    announcement_id = (request.form.get("announcement_id") or "").strip()
+                    if announcement_id.isdigit() and toggle_announcement(int(announcement_id)):
+                        flash("Статус объявления изменен.", "success")
+                    else:
+                        flash("Объявление не найдено.", "error")
+                elif action == "delete_announcement":
+                    announcement_id = (request.form.get("announcement_id") or "").strip()
+                    if announcement_id.isdigit() and delete_announcement(int(announcement_id)):
+                        flash("Объявление удалено.", "success")
+                    else:
+                        flash("Объявление не найдено.", "error")
                 return redirect(url_for(
                     "admin_dashboard",
                     section=admin_section,
@@ -1101,6 +1274,8 @@ def admin_dashboard():
     parser_state = get_parser_state()
     planshetka_state = get_planshetka_state()
     auto_cfg = get_auto_schedule()
+    telegram_settings = load_telegram_settings()
+    announcements = fetch_admin_announcements()
     return render_template(
         "admin_dashboard.html",
         title="Админ-панель",
@@ -1132,6 +1307,8 @@ def admin_dashboard():
         users_role=users_role,
         users_group_id_filter=users_group_id_filter,
         users_group_by=users_group_by,
+        telegram_settings=telegram_settings,
+        announcements=announcements,
     )
 
 
@@ -1152,8 +1329,15 @@ def admin_planshetka_status():
 ensure_auto_schedule_table()
 ensure_planshetka_tables()
 ensure_runtime_state_table()
+ensure_personalization_tables()
+ensure_bot_tables()
 repair_runtime_state_encoding()
 reset_runtime_state_flags()
+detect_and_record_schedule_changes()
+
+if should_start_background_threads():
+    Thread(target=telegram_polling_worker, daemon=True).start()
+    Thread(target=telegram_notification_worker, daemon=True).start()
 
 
 if __name__ == "__main__":

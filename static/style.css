@@ -161,6 +161,16 @@ input, select, button {
   color: var(--text);
 }
 
+textarea {
+  border: 1px solid var(--input-border);
+  border-radius: 8px;
+  padding: 0.58rem;
+  font: inherit;
+  background: var(--card-bg);
+  color: var(--text);
+  resize: vertical;
+}
+
 button {
   background: var(--primary);
   color: #fff;
@@ -508,6 +518,142 @@ th, td {
 
 @media (max-width: 1280px) {
   .dictionary-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.dashboard-hero {
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+  align-items: start;
+}
+
+.hero-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(120px, 1fr));
+  gap: 0.75rem;
+  min-width: min(100%, 420px);
+}
+
+.hero-stat {
+  padding: 0.85rem;
+  border: 1px solid var(--card-border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--primary) 8%, var(--card-bg));
+}
+
+.hero-stat strong {
+  display: block;
+  margin: 0.2rem 0;
+  font-size: 1.1rem;
+}
+
+.hero-stat__label {
+  display: block;
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.profile-grid,
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.mini-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.mini-list__item {
+  padding: 0.75rem;
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--card-bg) 88%, var(--primary) 12%);
+}
+
+.mini-list__item p {
+  margin: 0.35rem 0 0;
+}
+
+.mini-list__item.is-done {
+  opacity: 0.72;
+}
+
+.mini-list__row {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: baseline;
+}
+
+.chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.chip-form {
+  margin: 0;
+}
+
+.chip-button,
+.linkish-button {
+  background: transparent;
+  color: var(--primary);
+  border: 1px solid var(--input-border);
+}
+
+.chip-form--remove button {
+  min-height: auto;
+}
+
+.notes-form {
+  grid-template-columns: minmax(180px, 1fr) minmax(160px, 220px) minmax(260px, 1.4fr) auto;
+  align-items: end;
+}
+
+.notes-form__wide {
+  grid-column: auto;
+}
+
+.compact-actions form {
+  flex: 0 1 auto;
+}
+
+.warning-card {
+  border-color: #d9b24c;
+  background: color-mix(in srgb, #f4df9c 28%, var(--card-bg));
+}
+
+.lesson-block__head {
+  display: flex;
+  gap: 0.6rem;
+  justify-content: space-between;
+  align-items: start;
+}
+
+.favorite-inline-form {
+  margin: 0;
+}
+
+@media (max-width: 1100px) {
+  .profile-grid,
+  .dashboard-grid,
+  .hero-stats {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard-hero {
+    flex-direction: column;
+  }
+
+  .notes-form {
     grid-template-columns: 1fr;
   }
 }

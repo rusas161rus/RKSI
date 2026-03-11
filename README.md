@@ -73,6 +73,14 @@ export PGPASSWORD='<DB_PASSWORD>'
 psql -h <DB_HOST> -p <DB_PORT> -U <DB_USER> -d <DB_NAME> -f sql/000_reset_main.sql
 psql -h <DB_HOST> -p <DB_PORT> -U <DB_USER> -d <DB_NAME> -f sql/001_main_schema.sql
 psql -h <DB_HOST> -p <DB_PORT> -U <DB_USER> -d <DB_NAME> -f sql/002_parser_schema.sql
+psql -h <DB_HOST> -p <DB_PORT> -U <DB_USER> -d <DB_NAME> -f sql/004_personalization.sql
+```
+
+Для отдельной БД Telegram-бота:
+
+```bash
+export PGPASSWORD='<BOT_DB_PASSWORD>'
+psql -h <BOT_DB_HOST> -p <BOT_DB_PORT> -U <BOT_DB_USER> -d <BOT_DB_NAME> -f sql/005_bot_schema.sql
 ```
 
 Создать первого админа:

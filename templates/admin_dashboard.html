@@ -119,6 +119,84 @@
   <pre class="parser-log" id="planshetkaLog">{% if planshetka_log_lines %}{{ planshetka_log_lines|join('\n') }}{% else %}Лог пока пуст.{% endif %}</pre>
 </section>
 
+<section class="card" id="section-telegram-bot">
+  <h3>Telegram-бот и уведомления</h3>
+  <form method="post" class="grid-form">
+    <input type="hidden" name="section" value="overview" />
+    <input type="hidden" name="action" value="save_telegram_settings" />
+    <label>Токен бота
+      <input type="text" name="telegram_bot_token" value="{{ telegram_settings.bot_token }}" placeholder="123456:ABC..." />
+    </label>
+    <label>Username бота
+      <input type="text" name="telegram_bot_username" value="{{ telegram_settings.bot_username }}" placeholder="my_schedule_bot" />
+    </label>
+    <label>Базовый URL сайта
+      <input type="url" name="site_base_url" value="{{ telegram_settings.site_base_url }}" placeholder="https://example.com" />
+    </label>
+    <label class="inline-check"><input type="checkbox" name="telegram_polling_enabled" value="1" {% if telegram_settings.polling_enabled %}checked{% endif %} /> Включить long polling бота</label>
+    <label class="inline-check"><input type="checkbox" name="telegram_notifications_enabled" value="1" {% if telegram_settings.notifications_enabled %}checked{% endif %} /> Отправлять уведомления пользователям</label>
+    <button type="submit">Сохранить настройки Telegram</button>
+  </form>
+  <p class="meta">Пользователь должен сгенерировать код в личном кабинете и отправить его боту. После привязки бот показывает расписание по кнопкам и дает ссылки на сайт.</p>
+</section>
+
+<section class="card" id="section-announcements">
+  <h3>Объявления для личного кабинета</h3>
+  <form method="post" class="grid-form">
+    <input type="hidden" name="section" value="overview" />
+    <input type="hidden" name="action" value="create_announcement" />
+    <label>Для группы
+      <select name="announcement_group_id">
+        <option value="">Все группы</option>
+        {% for g in groups %}
+        <option value="{{ g[0] }}">{{ g[1] }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Заголовок
+      <input type="text" name="announcement_title" required />
+    </label>
+    <label>Текст
+      <textarea name="announcement_body" rows="3" required></textarea>
+    </label>
+    <button type="submit">Опубликовать объявление</button>
+  </form>
+  {% if announcements %}
+    <table class="dictionary-table" style="margin-top: 0.9rem;">
+      <thead>
+        <tr><th>ID</th><th>Группа</th><th>Заголовок</th><th>Статус</th><th>Дата</th><th>Действия</th></tr>
+      </thead>
+      <tbody>
+        {% for item in announcements %}
+        <tr>
+          <td>{{ item.id }}</td>
+          <td>{{ item.group_name }}</td>
+          <td>{{ item.title }}</td>
+          <td>{{ 'активно' if item.is_active else 'скрыто' }}</td>
+          <td>{{ item.created_at.strftime('%d.%m.%Y %H:%M') if item.created_at else '' }}</td>
+          <td class="users-actions">
+            <form method="post">
+              <input type="hidden" name="section" value="overview" />
+              <input type="hidden" name="action" value="toggle_announcement" />
+              <input type="hidden" name="announcement_id" value="{{ item.id }}" />
+              <button type="submit">{{ 'Скрыть' if item.is_active else 'Показать' }}</button>
+            </form>
+            <form method="post">
+              <input type="hidden" name="section" value="overview" />
+              <input type="hidden" name="action" value="delete_announcement" />
+              <input type="hidden" name="announcement_id" value="{{ item.id }}" />
+              <button type="submit" class="danger">Удалить</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="meta">Объявлений пока нет.</p>
+  {% endif %}
+</section>
+
 
 <section class="card">
   <h3>Создание пользователя/админа</h3>

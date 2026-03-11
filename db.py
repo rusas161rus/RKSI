@@ -24,8 +24,8 @@ def build_dsn(prefix: str = "DB") -> str:
 
 
 @contextmanager
-def get_db_conn():
-    conn = psycopg2.connect(build_dsn("DB"))
+def get_db_conn(prefix: str = "DB"):
+    conn = psycopg2.connect(build_dsn(prefix))
     try:
         yield conn
         conn.commit()
@@ -39,6 +39,16 @@ def get_db_conn():
 # Алиасы для читаемости кода
 get_main_conn = get_db_conn
 get_parser_conn = get_db_conn
+
+
+@contextmanager
+def get_bot_conn():
+    try:
+        with get_db_conn("BOT_DB") as conn:
+            yield conn
+    except RuntimeError:
+        with get_db_conn("DB") as conn:
+            yield conn
 
 
 def is_composite_teacher_name(name: str | None) -> bool:

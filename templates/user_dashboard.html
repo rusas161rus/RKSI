@@ -1,53 +1,264 @@
-﻿{% extends "base.html" %}
+{% extends "base.html" %}
+{% macro preserve_filters() -%}
+<input type="hidden" name="date" value="{{ selected_date }}" />
+<input type="hidden" name="period" value="{{ selected_period }}" />
+<input type="hidden" name="q" value="{{ search_query }}" />
+<input type="hidden" name="source" value="{{ source_mode }}" />
+<input type="hidden" name="teacher_id" value="{{ selected_teacher_id }}" />
+<input type="hidden" name="all_groups" value="{{ 1 if all_groups else 0 }}" />
+{%- endmacro %}
 {% block content %}
-<section class="card">
-  <h2>Личный кабинет</h2>
-  <p><strong>Пользователь:</strong> {{ user.full_name or user.username }}</p>
-
-  <form method="post" class="grid-form top-controls-form">
-    <input type="hidden" name="date" value="{{ selected_date }}" />
-    <input type="hidden" name="period" value="{{ selected_period }}" />
-    <input type="hidden" name="q" value="{{ search_query }}" />
-    <input type="hidden" name="source" value="{{ source_mode }}" />
-
-    <label>Моя учебная группа
-      <select name="preferred_group_id">
-        <option value="">Выберите группу</option>
-        {% for g in groups %}
-        <option value="{{ g[0] }}" {% if user.preferred_group_id == g[0] %}selected{% endif %}>{{ g[1] }}</option>
-        {% endfor %}
-      </select>
-    </label>
-
-    <label>Преподаватель
-      <select name="teacher_id">
-        <option value="">Все преподаватели</option>
-        {% for t in teachers %}
-        <option value="{{ t[0] }}" {% if selected_teacher_id and selected_teacher_id|int == t[0] %}selected{% endif %}>{{ t[1] }}</option>
-        {% endfor %}
-      </select>
-    </label>
-
-    <label class="inline-check"><input type="checkbox" name="all_groups" value="1" {% if all_groups %}checked{% endif %} /> Искать по всем группам</label>
-
-    <button type="submit" name="profile_action" value="apply">Применить</button>
-    <button type="submit" name="profile_action" value="reset_search" class="danger">Сбросить поиск</button>
-  </form>
+<section class="card dashboard-hero">
+  <div>
+    <h2>Личный кабинет</h2>
+    <p><strong>Пользователь:</strong> {{ user.full_name or user.username }}</p>
+    {% if group_name %}<p class="meta">Основная группа: {{ group_name }}</p>{% else %}<p class="meta">Группа пока не выбрана.</p>{% endif %}
+  </div>
+  <div class="hero-stats">
+    <div class="hero-stat">
+      <span class="hero-stat__label">Сегодня</span>
+      <strong>{{ today_summary.today_count }}</strong>
+      <span class="meta">занятий в системе</span>
+    </div>
+    <div class="hero-stat">
+      <span class="hero-stat__label">Изменения</span>
+      <strong>{{ change_events|length }}</strong>
+      <span class="meta">свежих событий</span>
+    </div>
+    <div class="hero-stat">
+      <span class="hero-stat__label">Telegram</span>
+      <strong>{% if user.telegram_chat_id %}подключен{% else %}не подключен{% endif %}</strong>
+      <span class="meta">бот и уведомления</span>
+    </div>
+  </div>
 </section>
 
-<section class="card">
-  <div class="action-row schedule-links" style="margin-bottom: 0.8rem;">
-    <form method="get" action="{{ planshetka_folder_url }}" target="_blank" rel="noopener noreferrer" class="grid-form compact-form">
-      <button type="submit" {% if not planshetka_folder_url %}disabled{% endif %}>Открыть папку Planshetka</button>
-    </form>
-    <form method="get" action="{{ rksi_schedule_url }}" target="_blank" rel="noopener noreferrer" class="grid-form compact-form">
-      <button type="submit">Открыть расписание РКСИ</button>
-    </form>
-    <form method="get" action="{{ rksi_mobile_schedule_url }}" target="_blank" rel="noopener noreferrer" class="grid-form compact-form">
-      <button type="submit">Открыть мобильную версию РКСИ</button>
-    </form>
-  </div>
+<div class="profile-grid">
+  <section class="card">
+    <h3>Профиль и фильтры</h3>
+    <form method="post" class="grid-form top-controls-form">
+      {{ preserve_filters() }}
+      <label>Моя учебная группа
+        <select name="preferred_group_id">
+          <option value="">Выберите группу</option>
+          {% for g in groups %}
+          <option value="{{ g[0] }}" {% if user.preferred_group_id == g[0] %}selected{% endif %}>{{ g[1] }}</option>
+          {% endfor %}
+        </select>
+      </label>
 
+      <label>Преподаватель
+        <select name="teacher_id">
+          <option value="">Все преподаватели</option>
+          {% for t in teachers %}
+          <option value="{{ t[0] }}" {% if selected_teacher_id and selected_teacher_id|int == t[0] %}selected{% endif %}>{{ t[1] }}{% if t[0] in favorite_teacher_ids %} ★{% endif %}</option>
+          {% endfor %}
+        </select>
+      </label>
+
+      <label class="inline-check"><input type="checkbox" name="all_groups" value="1" {% if all_groups %}checked{% endif %} /> Искать по всем группам</label>
+
+      <button type="submit" name="profile_action" value="apply">Применить</button>
+      <button type="submit" name="profile_action" value="reset_search" class="danger">Сбросить поиск</button>
+    </form>
+  </section>
+
+  <section class="card">
+    <h3>Telegram-бот</h3>
+    <p class="meta">{% if user.telegram_chat_id %}Аккаунт привязан к chat id {{ user.telegram_chat_id }}.{% else %}Привяжите Telegram, чтобы получить доступ к боту и уведомлениям.{% endif %}</p>
+    {% if telegram_bot_url %}<p><a href="{{ telegram_bot_url }}" target="_blank" rel="noopener noreferrer">Открыть бота</a></p>{% endif %}
+    {% if user.telegram_link_code and telegram_link_code_active %}
+      <p><strong>Активный код:</strong> <code>{{ user.telegram_link_code }}</code></p>
+      <p class="meta">Код действует 30 минут. Отправьте его боту одним сообщением.</p>
+    {% endif %}
+    <div class="action-row">
+      <form method="post" class="grid-form compact-form">
+        {{ preserve_filters() }}
+        <button type="submit" name="profile_action" value="generate_telegram_code">Сгенерировать код</button>
+      </form>
+      {% if user.telegram_chat_id %}
+      <form method="post" class="grid-form compact-form">
+        {{ preserve_filters() }}
+        <button type="submit" name="profile_action" value="unlink_telegram" class="danger">Отвязать Telegram</button>
+      </form>
+      {% endif %}
+    </div>
+    <form method="post" class="grid-form compact-form" style="margin-top: 0.8rem;">
+      {{ preserve_filters() }}
+      <input type="hidden" name="profile_action" value="save_telegram_notifications" />
+      <label class="inline-check"><input type="checkbox" name="telegram_notifications_enabled" value="1" {% if user.telegram_notifications_enabled %}checked{% endif %} /> Получать Telegram-уведомления об изменениях</label>
+      <button type="submit">Сохранить настройки Telegram</button>
+    </form>
+  </section>
+</div>
+
+<div class="dashboard-grid">
+  <section class="card">
+    <h3>Сегодня</h3>
+    {% if today_summary.next_lesson %}
+      <p><strong>Следующая пара:</strong> {{ today_summary.next_lesson.subject_name }}</p>
+      <p class="meta">
+        {% if today_summary.next_lesson.start_time and today_summary.next_lesson.end_time %}
+          {{ today_summary.next_lesson.start_time.strftime('%H:%M') }} - {{ today_summary.next_lesson.end_time.strftime('%H:%M') }}
+        {% else %}
+          Время не указано
+        {% endif %}
+        {% if today_summary.next_lesson.room %}, ауд. {{ today_summary.next_lesson.room }}{% endif %}
+      </p>
+    {% else %}
+      <p>Следующих занятий на сегодня нет.</p>
+    {% endif %}
+    {% if today_summary.rows %}
+      <div class="mini-list">
+        {% for row in today_summary.rows %}
+        <article class="mini-list__item">
+          <strong>{{ row.subject_name }}</strong>
+          <span class="meta">{% if row.start_time %}{{ row.start_time.strftime('%H:%M') }}{% else %}без времени{% endif %} · {{ row.source }}</span>
+        </article>
+        {% endfor %}
+      </div>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <h3>Избранные преподаватели</h3>
+    {% if favorite_teachers %}
+      <div class="chip-list">
+        {% for teacher in favorite_teachers %}
+        <form method="get" class="chip-form">
+          <input type="hidden" name="date" value="{{ selected_date }}" />
+          <input type="hidden" name="period" value="{{ selected_period }}" />
+          <input type="hidden" name="q" value="{{ search_query }}" />
+          <input type="hidden" name="source" value="{{ source_mode }}" />
+          <input type="hidden" name="all_groups" value="{{ 1 if all_groups else 0 }}" />
+          <button type="submit" name="teacher_id" value="{{ teacher.id }}" class="chip-button">{{ teacher.full_name }}</button>
+        </form>
+        <form method="post" class="chip-form chip-form--remove">
+          {{ preserve_filters() }}
+          <input type="hidden" name="profile_action" value="toggle_favorite_teacher" />
+          <input type="hidden" name="favorite_teacher_id" value="{{ teacher.id }}" />
+          <button type="submit" class="danger">Убрать</button>
+        </form>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="meta">Пока пусто. Ниже в расписании можно добавлять преподавателей в избранное.</p>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <h3>Объявления</h3>
+    {% if announcements %}
+      <div class="mini-list">
+        {% for item in announcements %}
+        <article class="mini-list__item">
+          <strong>{{ item.title }}</strong>
+          <span class="meta">{{ item.group_name }} · {{ item.created_at.strftime('%d.%m.%Y %H:%M') if item.created_at else '' }}</span>
+          <p>{{ item.body }}</p>
+        </article>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="meta">Для вашей группы объявлений пока нет.</p>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <h3>Лента изменений</h3>
+    {% if change_events %}
+      <div class="mini-list">
+        {% for event in change_events %}
+        <article class="mini-list__item">
+          <strong>{{ event.event_text }}</strong>
+          <span class="meta">{{ event.detected_at.strftime('%d.%m.%Y %H:%M') if event.detected_at else '' }}</span>
+        </article>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="meta">Изменений по вашей группе пока не зафиксировано.</p>
+    {% endif %}
+  </section>
+</div>
+
+<div class="dashboard-grid">
+  <section class="card">
+    <h3>Мои заметки и дедлайны</h3>
+    <form method="post" class="grid-form notes-form">
+      {{ preserve_filters() }}
+      <input type="hidden" name="profile_action" value="create_note" />
+      <label>Заголовок
+        <input type="text" name="note_title" required />
+      </label>
+      <label>Срок
+        <input type="date" name="note_due_date" />
+      </label>
+      <label class="notes-form__wide">Комментарий
+        <textarea name="note_text" rows="3" placeholder="Что нужно не забыть?"></textarea>
+      </label>
+      <button type="submit">Добавить заметку</button>
+    </form>
+    {% if notes %}
+      <div class="mini-list">
+        {% for note in notes %}
+        <article class="mini-list__item {% if note.is_done %}is-done{% endif %}">
+          <div class="mini-list__row">
+            <strong>{{ note.title }}</strong>
+            {% if note.due_date %}<span class="meta">до {{ note.due_date.strftime('%d.%m.%Y') }}</span>{% endif %}
+          </div>
+          {% if note.note_text %}<p>{{ note.note_text }}</p>{% endif %}
+          <div class="action-row compact-actions">
+            <form method="post" class="grid-form compact-form">
+              {{ preserve_filters() }}
+              <input type="hidden" name="profile_action" value="toggle_note_done" />
+              <input type="hidden" name="note_id" value="{{ note.id }}" />
+              <button type="submit">{% if note.is_done %}Вернуть в работу{% else %}Отметить выполненной{% endif %}</button>
+            </form>
+            <form method="post" class="grid-form compact-form">
+              {{ preserve_filters() }}
+              <input type="hidden" name="profile_action" value="delete_note" />
+              <input type="hidden" name="note_id" value="{{ note.id }}" />
+              <button type="submit" class="danger">Удалить</button>
+            </form>
+          </div>
+        </article>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="meta">Пока нет ни одной личной заметки.</p>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <div class="action-row schedule-links" style="margin-bottom: 0.8rem;">
+      <form method="get" action="{{ planshetka_folder_url }}" target="_blank" rel="noopener noreferrer" class="grid-form compact-form">
+        <button type="submit" {% if not planshetka_folder_url %}disabled{% endif %}>Открыть папку Planshetka</button>
+      </form>
+      <form method="get" action="{{ rksi_schedule_url }}" target="_blank" rel="noopener noreferrer" class="grid-form compact-form">
+        <button type="submit">Открыть расписание РКСИ</button>
+      </form>
+      <form method="get" action="{{ rksi_mobile_schedule_url }}" target="_blank" rel="noopener noreferrer" class="grid-form compact-form">
+        <button type="submit">Открыть мобильную версию РКСИ</button>
+      </form>
+    </div>
+
+    <h3>Расхождения источников</h3>
+    {% if source_conflicts %}
+      <div class="mini-list">
+        {% for conflict in source_conflicts %}
+        <article class="mini-list__item warning-card">
+          <strong>{{ conflict.lesson_date.strftime('%d.%m.%Y') }} {% if conflict.start_time %}{{ conflict.start_time.strftime('%H:%M') }}{% endif %}</strong>
+          <p>РКСИ: {{ conflict.rksi_subject }}{% if conflict.rksi_teacher %}, {{ conflict.rksi_teacher }}{% endif %}{% if conflict.rksi_room %}, ауд. {{ conflict.rksi_room }}{% endif %}</p>
+          <p>Planshetka: {{ conflict.planshetka_subject }}{% if conflict.planshetka_teacher %}, {{ conflict.planshetka_teacher }}{% endif %}{% if conflict.planshetka_room %}, ауд. {{ conflict.planshetka_room }}{% endif %}</p>
+        </article>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="meta">Явных расхождений между РКСИ и Planshetka на выбранный период не найдено.</p>
+    {% endif %}
+  </section>
+</div>
+
+<section class="card">
   <h2>Расписание</h2>
   <p class="meta">Переключить источник:</p>
   <div class="action-row source-switch" style="margin-bottom: 0.8rem;">
@@ -101,12 +312,21 @@
         {% for day in schedule_days %}
         <section class="day-column">
           <h3>{{ day.header }}</h3>
-
           {% if day.rows %}
             {% for row in day.rows %}
             <article class="lesson-block">
               {% if row[7] != 'planshetka' %}<p class="lesson-time">{% if row[2] and row[3] %}{{ row[2] }} — {{ row[3] }}{% else %}без времени{% endif %}</p>{% endif %}
-              <h4>{{ row[4] }}</h4>
+              <div class="lesson-block__head">
+                <h4>{{ row[4] }}</h4>
+                {% if row[8] %}
+                <form method="post" class="favorite-inline-form">
+                  {{ preserve_filters() }}
+                  <input type="hidden" name="profile_action" value="toggle_favorite_teacher" />
+                  <input type="hidden" name="favorite_teacher_id" value="{{ row[8] }}" />
+                  <button type="submit" class="linkish-button">{% if row[8] in favorite_teacher_ids %}Убрать из избранного{% else %}В избранное{% endif %}</button>
+                </form>
+                {% endif %}
+              </div>
               <p class="lesson-detail">{{ row[5] or "" }}{% if row[6] %}, ауд. {{ row[6] }}{% endif %}</p>
               {% if all_groups %}<p class="lesson-detail">Группа: {{ row[9] }}</p>{% endif %}
               <small class="source">Источник: {{ "сайт РКСИ" if row[7] == "rksi" else ("Planshetka" if row[7] == "planshetka" else "ручное расписание") }}</small>
@@ -126,5 +346,3 @@
   {% endif %}
 </section>
 {% endblock %}
-
-
