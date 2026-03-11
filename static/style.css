@@ -866,8 +866,9 @@ th, td {
 }
 
 .ai-shell {
-  max-width: 1000px;
-  margin: 0 auto 1rem;
+  width: 100%;
+  max-width: none;
+  margin: 0 0 1rem;
 }
 
 .ai-shell__head {
