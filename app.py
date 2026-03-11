@@ -17,10 +17,14 @@ from llm_assistant import (
     build_default_schedule_context,
     build_ollama_messages,
     call_ollama_chat,
+    clear_chat_messages,
     clear_pending_note,
     ensure_llm_tables,
+    extract_add_notes_request,
+    extract_note_commands,
     extract_quick_command,
     extract_note_payload,
+    extract_recent_assistant_note_commands,
     extract_search_query,
     extract_study_subject,
     fetch_group_subject_options,
@@ -789,6 +793,43 @@ def api_ai_chat():
     chat_session_id = get_or_create_chat_session(user_id)
     save_chat_message(chat_session_id, "user", message_text)
     ai_settings = get_ai_user_settings(user_id)
+    recent_messages = fetch_chat_messages(chat_session_id, limit=40)
+
+    def create_notes_batch(note_payloads: list[dict[str, str]], batch_source: str):
+        unique_payloads: list[dict[str, str]] = []
+        seen_keys: set[tuple[str, str, str]] = set()
+        for note in note_payloads:
+            key = (
+                (note.get("title") or "").strip().lower(),
+                (note.get("note_text") or "").strip().lower(),
+                (note.get("due_date") or "").strip(),
+            )
+            if not key[0] or key in seen_keys:
+                continue
+            seen_keys.add(key)
+            unique_payloads.append(note)
+
+        created = 0
+        failed = 0
+        for note in unique_payloads:
+            try:
+                create_user_note(user_id, note.get("title", ""), note.get("note_text", ""), note.get("due_date", ""))
+                created += 1
+            except Exception:
+                failed += 1
+
+        clear_pending_note(user_id)
+        if created:
+            reply = f"Готово. Добавил заметок в личный кабинет: {created}."
+            if failed:
+                reply += f" Не удалось добавить: {failed}."
+            meta = {"note_batch_created": created, "note_batch_failed": failed, "note_batch_source": batch_source}
+        else:
+            reply = "Не удалось добавить заметки. Проверьте формат /note и доступность ЛК."
+            meta = {"note_batch_created": 0, "note_batch_failed": failed, "note_batch_source": batch_source, "note_error": "batch_failed"}
+
+        save_chat_message(chat_session_id, "assistant", reply, meta)
+        return jsonify({"ok": True, "reply": reply, "meta": meta})
 
     quick_command = extract_quick_command(message_text)
     if quick_command:
@@ -801,6 +842,37 @@ def api_ai_chat():
         reply, meta = build_study_plan(user_id, study_subject)
         save_chat_message(chat_session_id, "assistant", reply, meta)
         return jsonify({"ok": True, "reply": reply, "meta": meta})
+
+    direct_note_commands = extract_note_commands(message_text, limit=40)
+    if direct_note_commands:
+        if not ai_settings.get("allow_note_creation"):
+            reply = "Создание заметок выключено. Включите разрешение на этой странице и повторите запрос."
+            save_chat_message(chat_session_id, "assistant", reply, {"note_created": False, "note_denied": True})
+            return jsonify({"ok": True, "reply": reply, "meta": {"note_created": False, "note_denied": True}})
+        if len(direct_note_commands) == 1 and message_text.strip().lower().startswith("/note "):
+            pending_note = upsert_pending_note(user_id, chat_session_id, direct_note_commands[0])
+            reply = (
+                f"Проверьте черновик заметки: «{pending_note['title']}». "
+                "Если всё верно, нажмите «Подтвердить заметку», иначе «Отмена»."
+            )
+            meta = {"note_created": False, "note_pending_confirmation": True, "pending_note": pending_note}
+            save_chat_message(chat_session_id, "assistant", reply, meta)
+            return jsonify({"ok": True, "reply": reply, "meta": meta})
+        return create_notes_batch(direct_note_commands, "direct_note_commands")
+
+    if extract_add_notes_request(message_text):
+        if not ai_settings.get("allow_note_creation"):
+            reply = "Создание заметок выключено. Включите разрешение на этой странице и повторите запрос."
+            save_chat_message(chat_session_id, "assistant", reply, {"note_created": False, "note_denied": True})
+            return jsonify({"ok": True, "reply": reply, "meta": {"note_created": False, "note_denied": True}})
+
+        recent_note_commands = extract_recent_assistant_note_commands(recent_messages, limit=40)
+        if not recent_note_commands:
+            reply = "Не нашёл в последних ответах команд вида /note ... Сначала попросите ИИ сформировать заметки или отправьте команды /note вручную."
+            meta = {"note_batch_created": 0, "note_error": "no_recent_note_commands"}
+            save_chat_message(chat_session_id, "assistant", reply, meta)
+            return jsonify({"ok": True, "reply": reply, "meta": meta})
+        return create_notes_batch(recent_note_commands, "recent_assistant_note_commands")
 
     note_payload = extract_note_payload(message_text)
     if note_payload is not None:
@@ -828,7 +900,6 @@ def api_ai_chat():
         today = date.today()
         search_context = fetch_schedule_context(user_id, today - timedelta(days=7), today + timedelta(days=45), limit=120, keyword=search_query)
 
-    recent_messages = fetch_chat_messages(chat_session_id, limit=25)
     ollama_messages = build_ollama_messages(
         message_text,
         recent_messages,
@@ -846,6 +917,20 @@ def api_ai_chat():
 
     save_chat_message(chat_session_id, "assistant", reply, meta)
     return jsonify({"ok": True, "reply": reply, "meta": meta})
+
+
+@app.route("/api/ai/clear", methods=["POST"])
+@login_required
+def api_ai_clear():
+    llm_ready, llm_error = ensure_llm_ready()
+    if not llm_ready:
+        return jsonify({"ok": False, "error": f"LLM storage unavailable: {llm_error}"}), 503
+
+    user_id = int(session["user_id"])
+    chat_session_id = get_or_create_chat_session(user_id)
+    deleted_messages = clear_chat_messages(chat_session_id)
+    clear_pending_note(user_id)
+    return jsonify({"ok": True, "meta": {"chat_cleared": True, "deleted_messages": deleted_messages}})
 
 
 @app.route("/api/ai/note-action", methods=["POST"])

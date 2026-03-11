@@ -784,6 +784,23 @@ th, td {
   margin: 0;
 }
 
+.ai-shell__head-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.ai-shell__head-actions .meta {
+  margin: 0;
+}
+
+.ai-clear-btn {
+  min-height: 2rem;
+  padding: 0.25rem 0.6rem;
+}
+
 .ai-settings-form {
   grid-template-columns: 1fr;
   margin-top: 0.7rem;

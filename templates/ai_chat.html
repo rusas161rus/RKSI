@@ -3,7 +3,10 @@
 <section class="card ai-shell">
   <div class="ai-shell__head">
     <h2>ИИ</h2>
-    <p class="meta">Модель: {{ ollama_model }}</p>
+    <div class="ai-shell__head-actions">
+      <p class="meta">Модель: {{ ollama_model }}</p>
+      <button type="button" id="clearChatBtn" class="ai-quick-btn ai-clear-btn" {% if not llm_ready %}disabled{% endif %}>Очистить чат</button>
+    </div>
   </div>
   <p class="meta">Ассистент может смотреть расписание вашей группы, выполнять поиск по расписанию и по команде создавать заметки в ЛК.</p>
   <p class="meta">Формат заметки: <code>/note Заголовок | Текст | YYYY-MM-DD</code></p>
@@ -92,6 +95,7 @@
     var chatLog = document.getElementById('aiChatLog');
     var messageInput = document.getElementById('aiMessageInput');
     var sendButton = document.getElementById('aiSendBtn');
+    var clearChatBtn = document.getElementById('clearChatBtn');
     var statusNode = document.getElementById('aiStatus');
 
     if (!chatForm || !chatLog || !messageInput || !sendButton) {
@@ -110,6 +114,21 @@
       head.textContent = role === 'user' ? 'Вы' : 'ИИ';
       var body = document.createElement('p');
       body.textContent = text;
+      card.appendChild(head);
+      card.appendChild(body);
+      chatLog.appendChild(card);
+      chatLog.scrollTop = chatLog.scrollHeight;
+    }
+
+    function resetChatLog() {
+      if (!chatLog) return;
+      chatLog.innerHTML = '';
+      var card = document.createElement('article');
+      card.className = 'ai-message ai-message--assistant';
+      var head = document.createElement('h4');
+      head.textContent = 'ИИ';
+      var body = document.createElement('p');
+      body.textContent = 'Чат очищен. Задайте вопрос по расписанию или нажмите быструю кнопку.';
       card.appendChild(head);
       card.appendChild(body);
       chatLog.appendChild(card);
@@ -147,6 +166,9 @@
       sendButton.disabled = isPending;
       messageInput.disabled = isPending;
       sendButton.textContent = isPending ? 'Отправка...' : 'Отправить';
+      if (clearChatBtn) {
+        clearChatBtn.disabled = isPending;
+      }
       if (quickActions) {
         quickActions.querySelectorAll('button').forEach(function (btn) {
           btn.disabled = isPending;
@@ -300,6 +322,41 @@
           }
           sendMessage(command, label);
         });
+      });
+    }
+
+    if (clearChatBtn) {
+      clearChatBtn.addEventListener('click', function () {
+        if (!window.confirm('Очистить всю историю сообщений в этом чате?')) {
+          return;
+        }
+
+        setPending(true);
+        setStatus('Очищаю историю чата...');
+        fetch('{{ url_for("api_ai_clear") }}', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({})
+        })
+          .then(function (response) { return response.json(); })
+          .then(function (payload) {
+            if (payload && payload.ok) {
+              renderPendingNote(null);
+              resetChatLog();
+              setStatus('История чата очищена.');
+            } else {
+              appendMessage('assistant', (payload && payload.error) ? payload.error : 'Не удалось очистить историю чата.');
+              setStatus('Ошибка очистки чата.');
+            }
+          })
+          .catch(function () {
+            appendMessage('assistant', 'Ошибка сети при очистке чата.');
+            setStatus('Ошибка сети.');
+          })
+          .finally(function () {
+            setPending(false);
+            messageInput.focus();
+          });
       });
     }
 

@@ -26,6 +26,7 @@ STUDY_TRIGGERS = (
     "учебный план по ",
 )
 DATE_RE = re.compile(r"\b(\d{4}-\d{2}-\d{2})\b")
+NOTE_COMMAND_RE = re.compile(r"(?im)^\s*(?:[-*]\s*)?/note\s+(.+)$")
 
 
 def ensure_llm_tables() -> None:
@@ -182,6 +183,15 @@ def save_chat_message(session_id: int, role: str, content: str, meta: dict[str, 
                 (session_id, role, cleaned, Json(meta or {})),
             )
             cur.execute("UPDATE ai_chat_sessions SET updated_at = now() WHERE id = %s", (session_id,))
+
+
+def clear_chat_messages(session_id: int) -> int:
+    with get_llm_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM ai_chat_messages WHERE session_id = %s", (session_id,))
+            deleted = cur.rowcount
+            cur.execute("UPDATE ai_chat_sessions SET updated_at = now() WHERE id = %s", (session_id,))
+    return int(deleted)
 
 
 def get_ai_user_settings(user_id: int) -> dict[str, Any]:
@@ -657,6 +667,62 @@ def extract_note_payload(user_text: str) -> dict[str, str] | None:
     return {"title": title, "note_text": note_text, "due_date": due_date}
 
 
+def _parse_note_payload_from_command(command_body: str) -> dict[str, str] | None:
+    parts = [part.strip() for part in (command_body or "").split("|")]
+    if not parts:
+        return None
+    title = parts[0][:180].strip()
+    if not title:
+        return None
+    note_text = parts[1].strip() if len(parts) > 1 else ""
+    due_date = ""
+    if len(parts) > 2:
+        due_date = normalize_due_date(parts[2])
+    else:
+        date_match = DATE_RE.search(command_body or "")
+        if date_match:
+            due_date = normalize_due_date(date_match.group(1))
+    return {"title": title, "note_text": note_text, "due_date": due_date}
+
+
+def extract_note_commands(user_text: str, limit: int = 40) -> list[dict[str, str]]:
+    text = (user_text or "").replace("\r\n", "\n")
+    payloads: list[dict[str, str]] = []
+    for match in NOTE_COMMAND_RE.finditer(text):
+        payload = _parse_note_payload_from_command(match.group(1))
+        if payload:
+            payloads.append(payload)
+        if len(payloads) >= max(1, limit):
+            break
+    return payloads
+
+
+def extract_add_notes_request(user_text: str) -> bool:
+    text = _normalize_text(user_text).lower()
+    if not text:
+        return False
+    if text.startswith("/addnotes") or text.startswith("/add-notes") or text.startswith("/add notes"):
+        return True
+    if "add note" in text or "add notes" in text:
+        return True
+
+    add_markers = ("добав", "созда", "сдела")
+    note_markers = ("замет", "в лк", "в личн", "личн кабинет", "личный кабинет")
+    return any(marker in text for marker in add_markers) and any(marker in text for marker in note_markers)
+
+
+def extract_recent_assistant_note_commands(recent_messages: list[dict[str, Any]], limit: int = 40) -> list[dict[str, str]]:
+    collected: list[dict[str, str]] = []
+    for item in reversed(recent_messages):
+        if item.get("role") != "assistant":
+            continue
+        commands = extract_note_commands(str(item.get("content") or ""), limit=limit)
+        if commands:
+            collected.extend(commands)
+            break
+    return collected[: max(1, limit)]
+
+
 def normalize_due_date(raw_text: str) -> str:
     value = _normalize_text(raw_text).strip(" .")
     if not value:
@@ -680,7 +746,7 @@ def build_ollama_messages(
         "Ты ассистент приложения расписания РКСИ. Отвечай кратко, по делу и дружелюбно. "
         "Опирайся только на переданный контекст расписания. Если данных нет, честно скажи об этом. "
         "Если пользователь просит создать заметку, напомни формат: /note Заголовок | Текст | YYYY-MM-DD "
-        "и то, что после этого нужно подтвердить действие. "
+        "и то, что после этого нужно подтвердить действие. Если в ответе есть много /note строк, для массового добавления можно использовать /addnotes. "
         "Для недельного плана подготовки по предмету используй команду /study Название предмета. "
         f"Разрешение на создание заметок: {'включено' if can_create_note else 'выключено'}."
     )
