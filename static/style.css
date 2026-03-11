@@ -575,6 +575,14 @@ th, td {
   white-space: nowrap;
 }
 
+.admin-announcements-table .announcement-body-cell {
+  min-width: 260px;
+  max-width: 520px;
+  white-space: pre-line;
+  word-break: break-word;
+  vertical-align: top;
+}
+
 .dictionary-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

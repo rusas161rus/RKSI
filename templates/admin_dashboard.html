@@ -162,9 +162,9 @@
     <button type="submit" class="admin-announcement-form__submit">Опубликовать объявление</button>
   </form>
   {% if announcements %}
-    <table class="dictionary-table" style="margin-top: 0.9rem;">
+    <table class="dictionary-table admin-announcements-table" style="margin-top: 0.9rem;">
       <thead>
-        <tr><th>ID</th><th>Группа</th><th>Заголовок</th><th>Автор</th><th>Статус</th><th>Дата</th><th>Действия</th></tr>
+        <tr><th>ID</th><th>Группа</th><th>Заголовок</th><th>Текст</th><th>Автор</th><th>Статус</th><th>Дата</th><th>Действия</th></tr>
       </thead>
       <tbody>
         {% for item in announcements %}
@@ -172,6 +172,7 @@
           <td>{{ item.id }}</td>
           <td>{{ item.group_name }}</td>
           <td>{{ item.title }}</td>
+          <td class="announcement-body-cell">{{ item.body }}</td>
           <td>{{ item.author_name }}</td>
           <td>{{ 'активно' if item.is_active else 'скрыто' }}</td>
           <td>{{ item.created_at.strftime('%d.%m.%Y %H:%M') if item.created_at else '' }}</td>
