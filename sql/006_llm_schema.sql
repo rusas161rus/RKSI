@@ -28,3 +28,16 @@ CREATE TABLE IF NOT EXISTS ai_user_settings (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+CREATE TABLE IF NOT EXISTS ai_pending_notes (
+  user_id BIGINT PRIMARY KEY,
+  session_id BIGINT NOT NULL REFERENCES ai_chat_sessions(id) ON DELETE CASCADE,
+  title VARCHAR(180) NOT NULL,
+  note_text TEXT,
+  due_date DATE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_ai_pending_notes_session
+  ON ai_pending_notes(session_id, updated_at DESC);

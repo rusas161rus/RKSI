@@ -12,17 +12,22 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 from db import ensure_schedule_room_columns, get_main_conn, is_composite_teacher_name
 from llm_assistant import (
+    build_quick_reply,
     build_default_schedule_context,
     build_ollama_messages,
     call_ollama_chat,
+    clear_pending_note,
     ensure_llm_tables,
+    extract_quick_command,
     extract_note_payload,
     extract_search_query,
     fetch_chat_messages,
+    get_pending_note,
     fetch_schedule_context,
     get_ai_user_settings,
     get_or_create_chat_session,
     save_chat_message,
+    upsert_pending_note,
     update_ai_user_settings,
 )
 from personalization import (
@@ -726,10 +731,12 @@ def ai_assistant_page():
     llm_ready, llm_error = ensure_llm_ready()
     ai_messages = []
     ai_settings = {"allow_note_creation": False}
+    pending_note = None
     if llm_ready:
         chat_session_id = get_or_create_chat_session(user["id"])
         ai_messages = fetch_chat_messages(chat_session_id, limit=80)
         ai_settings = get_ai_user_settings(user["id"])
+        pending_note = get_pending_note(user["id"])
     else:
         flash("Сервис ИИ временно недоступен. Проверьте подключение к LLM_DB.", "error")
 
@@ -739,6 +746,7 @@ def ai_assistant_page():
         user=user,
         ai_messages=ai_messages,
         ai_settings=ai_settings,
+        pending_note=pending_note,
         llm_ready=llm_ready,
         llm_error=llm_error,
         ollama_model=(os.getenv("OLLAMA_MODEL") or "qwen2.5:7b-instruct").strip(),
@@ -776,6 +784,12 @@ def api_ai_chat():
     save_chat_message(chat_session_id, "user", message_text)
     ai_settings = get_ai_user_settings(user_id)
 
+    quick_command = extract_quick_command(message_text)
+    if quick_command:
+        reply, meta = build_quick_reply(user_id, quick_command)
+        save_chat_message(chat_session_id, "assistant", reply, meta)
+        return jsonify({"ok": True, "reply": reply, "meta": meta})
+
     note_payload = extract_note_payload(message_text)
     if note_payload is not None:
         if not ai_settings.get("allow_note_creation"):
@@ -786,18 +800,14 @@ def api_ai_chat():
             reply = "Не удалось распознать заголовок. Используйте формат: /note Заголовок | Текст | YYYY-MM-DD"
             save_chat_message(chat_session_id, "assistant", reply, {"note_created": False, "note_error": "title_missing"})
             return jsonify({"ok": True, "reply": reply, "meta": {"note_created": False, "note_error": "title_missing"}})
-        try:
-            create_user_note(user_id, note_payload.get("title", ""), note_payload.get("note_text", ""), note_payload.get("due_date", ""))
-            due_date = note_payload.get("due_date", "")
-            reply = f"Готово. Заметка «{note_payload['title']}» добавлена в личный кабинет."
-            if due_date:
-                reply += f" Срок: {due_date}."
-            save_chat_message(chat_session_id, "assistant", reply, {"note_created": True, "note_payload": note_payload})
-            return jsonify({"ok": True, "reply": reply, "meta": {"note_created": True, "note_payload": note_payload}})
-        except Exception as exc:
-            reply = f"Не удалось создать заметку: {exc}"
-            save_chat_message(chat_session_id, "assistant", reply, {"note_created": False, "note_error": "create_failed"})
-            return jsonify({"ok": True, "reply": reply, "meta": {"note_created": False, "note_error": "create_failed"}})
+        pending_note = upsert_pending_note(user_id, chat_session_id, note_payload)
+        reply = (
+            f"Проверьте черновик заметки: «{pending_note['title']}». "
+            "Если всё верно, нажмите «Подтвердить заметку», иначе «Отмена»."
+        )
+        meta = {"note_created": False, "note_pending_confirmation": True, "pending_note": pending_note}
+        save_chat_message(chat_session_id, "assistant", reply, meta)
+        return jsonify({"ok": True, "reply": reply, "meta": meta})
 
     search_query = extract_search_query(message_text)
     schedule_context = build_default_schedule_context(user_id)
@@ -821,6 +831,54 @@ def api_ai_chat():
     except Exception as exc:
         reply = f"Не удалось получить ответ от модели. Проверьте OLLAMA_URL/OLLAMA_MODEL и доступность сервера. Детали: {exc}"
         meta = {"search_query": search_query or "", "model_error": str(exc)}
+
+    save_chat_message(chat_session_id, "assistant", reply, meta)
+    return jsonify({"ok": True, "reply": reply, "meta": meta})
+
+
+@app.route("/api/ai/note-action", methods=["POST"])
+@login_required
+def api_ai_note_action():
+    llm_ready, llm_error = ensure_llm_ready()
+    if not llm_ready:
+        return jsonify({"ok": False, "error": f"LLM storage unavailable: {llm_error}"}), 503
+
+    payload = request.get_json(silent=True) or {}
+    action = (payload.get("action") or "").strip().lower()
+    if action not in {"confirm", "cancel"}:
+        return jsonify({"ok": False, "error": "Некорректное действие. Используйте confirm или cancel."}), 400
+
+    user_id = int(session["user_id"])
+    chat_session_id = get_or_create_chat_session(user_id)
+    pending_note = get_pending_note(user_id)
+    if not pending_note:
+        return jsonify({"ok": False, "error": "Нет заметки, ожидающей подтверждения."}), 400
+
+    if action == "cancel":
+        clear_pending_note(user_id)
+        reply = "Создание заметки отменено."
+        meta = {"note_confirmed": False, "note_cancelled": True}
+        save_chat_message(chat_session_id, "assistant", reply, meta)
+        return jsonify({"ok": True, "reply": reply, "meta": meta})
+
+    ai_settings = get_ai_user_settings(user_id)
+    if not ai_settings.get("allow_note_creation"):
+        reply = "Создание заметок выключено. Включите разрешение и отправьте заметку заново."
+        meta = {"note_confirmed": False, "note_denied": True}
+        save_chat_message(chat_session_id, "assistant", reply, meta)
+        return jsonify({"ok": True, "reply": reply, "meta": meta})
+
+    try:
+        create_user_note(user_id, pending_note.get("title", ""), pending_note.get("note_text", ""), pending_note.get("due_date", ""))
+        clear_pending_note(user_id)
+        due_date = pending_note.get("due_date", "")
+        reply = f"Готово. Заметка «{pending_note.get('title', '')}» добавлена в личный кабинет."
+        if due_date:
+            reply += f" Срок: {due_date}."
+        meta = {"note_confirmed": True, "note_created": True}
+    except Exception as exc:
+        reply = f"Не удалось создать заметку: {exc}"
+        meta = {"note_confirmed": False, "note_error": "create_failed"}
 
     save_chat_message(chat_session_id, "assistant", reply, meta)
     return jsonify({"ok": True, "reply": reply, "meta": meta})

@@ -20,6 +20,23 @@
 
   <p id="aiStatus" class="meta"></p>
 
+  <div class="ai-quick-actions" id="aiQuickActions">
+    <button type="button" class="ai-quick-btn" data-command="/today" data-label="Покажи расписание на сегодня" {% if not llm_ready %}disabled{% endif %}>Сегодня</button>
+    <button type="button" class="ai-quick-btn" data-command="/tomorrow" data-label="Покажи расписание на завтра" {% if not llm_ready %}disabled{% endif %}>Завтра</button>
+    <button type="button" class="ai-quick-btn" data-command="/week" data-label="Покажи расписание на эту неделю" {% if not llm_ready %}disabled{% endif %}>Неделя</button>
+    <button type="button" class="ai-quick-btn" data-command="/changes" data-label="Покажи изменения расписания с вчера" {% if not llm_ready %}disabled{% endif %}>Изменения с вчера</button>
+    <button type="button" class="ai-quick-btn" data-command="__room__" data-label="Найти аудиторию" {% if not llm_ready %}disabled{% endif %}>Найти аудиторию</button>
+  </div>
+
+  <section id="pendingNoteBox" class="ai-pending-note {% if not pending_note %}is-hidden{% endif %}">
+    <h3>Черновик заметки</h3>
+    <p id="pendingNotePreview" class="meta"></p>
+    <div class="action-row ai-pending-note__actions">
+      <button type="button" id="confirmNoteBtn">Подтвердить заметку</button>
+      <button type="button" id="cancelNoteBtn" class="danger">Отмена</button>
+    </div>
+  </section>
+
   <div id="aiChatLog" class="ai-chat-log" aria-live="polite">
     {% if ai_messages %}
       {% for item in ai_messages %}
@@ -31,7 +48,7 @@
     {% else %}
       <article class="ai-message ai-message--assistant">
         <h4>ИИ</h4>
-        <p>Чат готов. Напишите вопрос по расписанию, например: "Найди занятия по математике на этой неделе".</p>
+        <p>Чат готов. Нажмите быструю кнопку или задайте вопрос по расписанию.</p>
       </article>
     {% endif %}
   </div>
@@ -47,8 +64,14 @@
 <script>
   (function () {
     var llmReady = {{ llm_ready | tojson }};
+    var initialPendingNote = {{ pending_note | tojson }};
     var settingsForm = document.getElementById('aiSettingsForm');
     var allowNoteCreation = document.getElementById('allowNoteCreation');
+    var quickActions = document.getElementById('aiQuickActions');
+    var pendingBox = document.getElementById('pendingNoteBox');
+    var pendingPreview = document.getElementById('pendingNotePreview');
+    var confirmNoteBtn = document.getElementById('confirmNoteBtn');
+    var cancelNoteBtn = document.getElementById('cancelNoteBtn');
     var chatForm = document.getElementById('aiChatForm');
     var chatLog = document.getElementById('aiChatLog');
     var messageInput = document.getElementById('aiMessageInput');
@@ -77,18 +100,133 @@
       chatLog.scrollTop = chatLog.scrollHeight;
     }
 
+    function formatPendingNote(note) {
+      if (!note || !note.title) {
+        return '';
+      }
+      var lines = ['Заголовок: ' + note.title];
+      if (note.note_text) {
+        lines.push('Текст: ' + note.note_text);
+      }
+      if (note.due_date) {
+        lines.push('Срок: ' + note.due_date);
+      }
+      return lines.join(' | ');
+    }
+
+    function renderPendingNote(note) {
+      if (!pendingBox || !pendingPreview) {
+        return;
+      }
+      if (note && note.title) {
+        pendingPreview.textContent = formatPendingNote(note);
+        pendingBox.classList.remove('is-hidden');
+      } else {
+        pendingPreview.textContent = '';
+        pendingBox.classList.add('is-hidden');
+      }
+    }
+
     function setPending(isPending) {
       sendButton.disabled = isPending;
       messageInput.disabled = isPending;
       sendButton.textContent = isPending ? 'Отправка...' : 'Отправить';
+      if (quickActions) {
+        quickActions.querySelectorAll('button').forEach(function (btn) {
+          btn.disabled = isPending;
+        });
+      }
+    }
+
+    function sendMessage(rawText, shownText) {
+      var text = (rawText || '').trim();
+      if (!text) {
+        setStatus('Введите сообщение.');
+        return Promise.resolve();
+      }
+
+      appendMessage('user', shownText || text);
+      messageInput.value = '';
+      setPending(true);
+      setStatus('ИИ думает...');
+
+      return fetch('{{ url_for("api_ai_chat") }}', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: text })
+      })
+        .then(function (response) { return response.json(); })
+        .then(function (payload) {
+          if (payload && payload.ok) {
+            appendMessage('assistant', payload.reply || 'Пустой ответ.');
+            if (payload.meta && payload.meta.note_pending_confirmation) {
+              renderPendingNote(payload.meta.pending_note || null);
+            }
+            if (payload.meta && (payload.meta.note_created || payload.meta.note_confirmed || payload.meta.note_cancelled)) {
+              renderPendingNote(null);
+            }
+            setStatus('');
+          } else {
+            appendMessage('assistant', (payload && payload.error) ? payload.error : 'Не удалось обработать запрос.');
+            setStatus('Ошибка запроса.');
+          }
+        })
+        .catch(function () {
+          appendMessage('assistant', 'Ошибка сети. Проверьте подключение и повторите запрос.');
+          setStatus('Ошибка сети.');
+        })
+        .finally(function () {
+          setPending(false);
+          messageInput.focus();
+        });
+    }
+
+    function sendNoteAction(action) {
+      if (!action) return;
+      if (!pendingBox || pendingBox.classList.contains('is-hidden')) return;
+
+      if (confirmNoteBtn) confirmNoteBtn.disabled = true;
+      if (cancelNoteBtn) cancelNoteBtn.disabled = true;
+      setStatus(action === 'confirm' ? 'Создаю заметку...' : 'Отменяю заметку...');
+
+      fetch('{{ url_for("api_ai_note_action") }}', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: action })
+      })
+        .then(function (response) { return response.json(); })
+        .then(function (payload) {
+          if (payload && payload.ok) {
+            appendMessage('assistant', payload.reply || 'Действие выполнено.');
+            if (payload.meta && (payload.meta.note_created || payload.meta.note_confirmed || payload.meta.note_cancelled)) {
+              renderPendingNote(null);
+            }
+            setStatus('');
+          } else {
+            appendMessage('assistant', (payload && payload.error) ? payload.error : 'Не удалось выполнить действие.');
+            setStatus('Ошибка действия.');
+          }
+        })
+        .catch(function () {
+          appendMessage('assistant', 'Ошибка сети при подтверждении заметки.');
+          setStatus('Ошибка сети.');
+        })
+        .finally(function () {
+          if (confirmNoteBtn) confirmNoteBtn.disabled = false;
+          if (cancelNoteBtn) cancelNoteBtn.disabled = false;
+          chatLog.scrollTop = chatLog.scrollHeight;
+        });
     }
 
     if (!llmReady) {
       messageInput.disabled = true;
       setStatus('Сервис ИИ временно недоступен.');
+      renderPendingNote(null);
       chatLog.scrollTop = chatLog.scrollHeight;
       return;
     }
+
+    renderPendingNote(initialPendingNote);
 
     if (settingsForm && allowNoteCreation) {
       allowNoteCreation.addEventListener('change', function () {
@@ -112,42 +250,40 @@
       });
     }
 
+    if (quickActions) {
+      quickActions.querySelectorAll('button').forEach(function (button) {
+        button.addEventListener('click', function () {
+          var command = button.getAttribute('data-command') || '';
+          var label = button.getAttribute('data-label') || button.textContent || 'Запрос';
+          if (!command) return;
+          if (command === '__room__') {
+            var roomText = window.prompt('Введите аудиторию или часть номера (например, 303):', '');
+            roomText = (roomText || '').trim();
+            if (!roomText) return;
+            sendMessage('/search ' + roomText, 'Найти аудиторию: ' + roomText);
+            return;
+          }
+          sendMessage(command, label);
+        });
+      });
+    }
+
+    if (confirmNoteBtn) {
+      confirmNoteBtn.addEventListener('click', function () {
+        sendNoteAction('confirm');
+      });
+    }
+
+    if (cancelNoteBtn) {
+      cancelNoteBtn.addEventListener('click', function () {
+        sendNoteAction('cancel');
+      });
+    }
+
     chatForm.addEventListener('submit', function (event) {
       event.preventDefault();
       var text = (messageInput.value || '').trim();
-      if (!text) {
-        setStatus('Введите сообщение.');
-        return;
-      }
-
-      appendMessage('user', text);
-      messageInput.value = '';
-      setPending(true);
-      setStatus('ИИ думает...');
-
-      fetch('{{ url_for("api_ai_chat") }}', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text })
-      })
-        .then(function (response) { return response.json(); })
-        .then(function (payload) {
-          if (payload && payload.ok) {
-            appendMessage('assistant', payload.reply || 'Пустой ответ.');
-            setStatus('');
-          } else {
-            appendMessage('assistant', (payload && payload.error) ? payload.error : 'Не удалось обработать запрос.');
-            setStatus('Ошибка запроса.');
-          }
-        })
-        .catch(function () {
-          appendMessage('assistant', 'Ошибка сети. Проверьте подключение и повторите запрос.');
-          setStatus('Ошибка сети.');
-        })
-        .finally(function () {
-          setPending(false);
-          messageInput.focus();
-        });
+      sendMessage(text, text);
     });
 
     chatLog.scrollTop = chatLog.scrollHeight;

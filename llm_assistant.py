@@ -10,6 +10,16 @@ from db import get_llm_conn, get_main_conn
 
 SEARCH_TRIGGERS = ("найди ", "поищи ", "ищи ", "поиск ", "search ")
 NOTE_TRIGGERS = ("/note ", "создай заметку", "добавь заметку", "сделай заметку")
+QUICK_COMMANDS = {
+    "/today": "today",
+    "/quick today": "today",
+    "/tomorrow": "tomorrow",
+    "/quick tomorrow": "tomorrow",
+    "/week": "week",
+    "/quick week": "week",
+    "/changes": "changes",
+    "/quick changes": "changes",
+}
 DATE_RE = re.compile(r"\b(\d{4}-\d{2}-\d{2})\b")
 
 
@@ -60,6 +70,25 @@ def ensure_llm_tables() -> None:
                     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
                 )
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS ai_pending_notes (
+                    user_id BIGINT PRIMARY KEY,
+                    session_id BIGINT NOT NULL REFERENCES ai_chat_sessions(id) ON DELETE CASCADE,
+                    title VARCHAR(180) NOT NULL,
+                    note_text TEXT,
+                    due_date DATE,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_ai_pending_notes_session
+                ON ai_pending_notes(session_id, updated_at DESC)
                 """
             )
 
@@ -151,6 +180,53 @@ def update_ai_user_settings(user_id: int, allow_note_creation: bool) -> dict[str
                 (user_id, allow_note_creation),
             )
     return {"allow_note_creation": bool(allow_note_creation)}
+
+
+def upsert_pending_note(user_id: int, session_id: int, note_payload: dict[str, str]) -> dict[str, Any]:
+    title = _normalize_text(note_payload.get("title", ""))[:180]
+    note_text = (note_payload.get("note_text") or "").strip() or None
+    due_date_raw = (note_payload.get("due_date") or "").strip()
+    due_date = due_date_raw or None
+    with get_llm_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO ai_pending_notes(user_id, session_id, title, note_text, due_date, updated_at)
+                VALUES (%s, %s, %s, %s, %s, now())
+                ON CONFLICT (user_id)
+                DO UPDATE SET
+                    session_id = EXCLUDED.session_id,
+                    title = EXCLUDED.title,
+                    note_text = EXCLUDED.note_text,
+                    due_date = EXCLUDED.due_date,
+                    updated_at = now()
+                """,
+                (user_id, session_id, title, note_text, due_date),
+            )
+    return {"title": title, "note_text": note_text or "", "due_date": due_date or ""}
+
+
+def get_pending_note(user_id: int) -> dict[str, Any] | None:
+    with get_llm_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT title, COALESCE(note_text, ''), due_date, updated_at
+                FROM ai_pending_notes
+                WHERE user_id = %s
+                """,
+                (user_id,),
+            )
+            row = cur.fetchone()
+    if not row:
+        return None
+    return {"title": row[0], "note_text": row[1], "due_date": row[2].isoformat() if row[2] else "", "updated_at": row[3]}
+
+
+def clear_pending_note(user_id: int) -> None:
+    with get_llm_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM ai_pending_notes WHERE user_id = %s", (user_id,))
 
 
 def _load_user_group(user_id: int) -> tuple[int | None, str | None]:
@@ -246,6 +322,72 @@ def fetch_schedule_context(user_id: int, start_day: date, end_day: date, limit: 
     return f"{title}\n{_format_schedule_rows(rows)}"
 
 
+def extract_quick_command(user_text: str) -> str | None:
+    text = _normalize_text(user_text).lower()
+    if not text:
+        return None
+    if text in QUICK_COMMANDS:
+        return QUICK_COMMANDS[text]
+    if "что изменилось" in text or ("изменен" in text and "вчера" in text):
+        return "changes"
+    return None
+
+
+def _week_start(day: date) -> date:
+    return day - timedelta(days=day.weekday())
+
+
+def build_recent_changes_summary(user_id: int, hours: int = 24, limit: int = 25) -> str:
+    group_id, group_name = _load_user_group(user_id)
+    if not group_id:
+        return "Не могу показать изменения: в личном кабинете не выбрана основная группа."
+    since_dt = datetime.now() - timedelta(hours=max(1, hours))
+    with get_main_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT detected_at, event_text, source_name, lesson_date, start_time
+                FROM group_schedule_change_events
+                WHERE group_id = %s
+                  AND detected_at >= %s
+                ORDER BY detected_at DESC
+                LIMIT %s
+                """,
+                (group_id, since_dt, max(1, limit)),
+            )
+            rows = cur.fetchall()
+    if not rows:
+        return f"Группа {group_name or '-'}: за последние {hours} часов изменений нет."
+    lines = [f"Группа {group_name or '-'}: изменения за последние {hours} часов:"]
+    for detected_at, event_text, source_name, lesson_date, start_time in rows:
+        detected_text = detected_at.strftime("%d.%m %H:%M") if detected_at else "--"
+        lesson_text = lesson_date.strftime("%d.%m.%Y") if lesson_date else "без даты"
+        if start_time:
+            lesson_text += f" {start_time.strftime('%H:%M')}"
+        lines.append(f"- [{detected_text}] {event_text} ({lesson_text}, источник: {source_name})")
+    return "\n".join(lines)
+
+
+def build_quick_reply(user_id: int, quick_command: str) -> tuple[str, dict[str, Any]]:
+    today = date.today()
+    if quick_command == "today":
+        text = "Расписание на сегодня:\n" + fetch_schedule_context(user_id, today, today, limit=80)
+        return text, {"quick_command": "today", "date_from": today.isoformat(), "date_to": today.isoformat()}
+    if quick_command == "tomorrow":
+        next_day = today + timedelta(days=1)
+        text = "Расписание на завтра:\n" + fetch_schedule_context(user_id, next_day, next_day, limit=80)
+        return text, {"quick_command": "tomorrow", "date_from": next_day.isoformat(), "date_to": next_day.isoformat()}
+    if quick_command == "week":
+        start_day = _week_start(today)
+        end_day = start_day + timedelta(days=6)
+        text = "Расписание на текущую неделю:\n" + fetch_schedule_context(user_id, start_day, end_day, limit=200)
+        return text, {"quick_command": "week", "date_from": start_day.isoformat(), "date_to": end_day.isoformat()}
+    if quick_command == "changes":
+        text = build_recent_changes_summary(user_id, hours=24, limit=30)
+        return text, {"quick_command": "changes", "window_hours": 24}
+    return "Не понял быструю команду.", {"quick_command": "unknown"}
+
+
 def extract_search_query(user_text: str) -> str | None:
     text = _normalize_text(user_text)
     if not text:
@@ -325,7 +467,8 @@ def build_ollama_messages(
     system_prompt = (
         "Ты ассистент приложения расписания РКСИ. Отвечай кратко, по делу и дружелюбно. "
         "Опирайся только на переданный контекст расписания. Если данных нет, честно скажи об этом. "
-        "Если пользователь просит создать заметку, напомни формат: /note Заголовок | Текст | YYYY-MM-DD. "
+        "Если пользователь просит создать заметку, напомни формат: /note Заголовок | Текст | YYYY-MM-DD "
+        "и то, что после этого нужно подтвердить действие. "
         f"Разрешение на создание заметок: {'включено' if can_create_note else 'выключено'}."
     )
     context_prompt = "Контекст расписания:\n" + schedule_context

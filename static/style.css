@@ -750,6 +750,43 @@ th, td {
   margin-top: 0.7rem;
 }
 
+.ai-quick-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0.45rem 0 0.8rem;
+}
+
+.ai-quick-btn {
+  min-height: 2.35rem;
+  padding: 0.35rem 0.7rem;
+}
+
+.ai-pending-note {
+  border: 1px solid color-mix(in srgb, var(--primary) 30%, var(--card-border));
+  border-radius: 10px;
+  padding: 0.65rem 0.75rem;
+  margin: 0.35rem 0 0.85rem;
+  background: color-mix(in srgb, var(--card-bg) 88%, var(--primary) 12%);
+}
+
+.ai-pending-note h3 {
+  margin: 0 0 0.28rem;
+  font-size: 1rem;
+}
+
+.ai-pending-note.is-hidden {
+  display: none;
+}
+
+.ai-pending-note__actions {
+  margin-top: 0.45rem;
+}
+
+.ai-pending-note__actions button {
+  min-height: 2.35rem;
+}
+
 .ai-chat-log {
   display: grid;
   gap: 0.65rem;
