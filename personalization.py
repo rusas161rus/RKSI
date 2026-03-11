@@ -718,11 +718,14 @@ def format_schedule_rows_for_bot(rows: list[dict[str, Any]], title: str) -> str:
 
     lines = [title]
     current_day = None
-    for row in merged_rows:
+    for idx, row in enumerate(merged_rows):
+        if idx > 0:
+            lines.append("")
         day_text = row["lesson_date"].strftime("%d.%m.%Y")
         if day_text != current_day:
             current_day = day_text
-            lines.append("")
+            if lines[-1] != "":
+                lines.append("")
             lines.append(day_text)
         if row["start_time"] and row["end_time"]:
             time_text = f"{row['start_time'].strftime('%H:%M')}-{row['end_time'].strftime('%H:%M')}"
