@@ -60,6 +60,17 @@ WEEKDAY_OPTIONS = [(0, "Понедельник"), (1, "Вторник"), (2, "С
 AUTO_SCHEDULER_ENABLED = os.getenv("ENABLE_BACKGROUND_PARSER", "0").strip().lower() in {"1", "true", "yes"}
 RKSI_SCHEDULE_URL = "https://www.rksi.ru/schedules"
 RKSI_MOBILE_SCHEDULE_URL = "https://www.rksi.ru/mobileschedule"
+DASHBOARD_WIDGETS = [
+    {"id": "profile", "title": "Личный кабинет", "default_size": "half"},
+    {"id": "telegram", "title": "Привязка Telegram", "default_size": "quarter"},
+    {"id": "favorites", "title": "Избранные преподаватели", "default_size": "quarter"},
+    {"id": "announcements", "title": "Объявления", "default_size": "half"},
+    {"id": "changes", "title": "Лента изменений", "default_size": "half"},
+    {"id": "today", "title": "Сегодня", "default_size": "half"},
+    {"id": "notes", "title": "Мои заметки и дедлайны", "default_size": "half"},
+    {"id": "conflicts", "title": "Расхождения источников", "default_size": "full"},
+    {"id": "schedule", "title": "Расписание", "default_size": "full"},
+]
 
 RUNTIME_STATE_DEFAULTS = {
     "parser": {
@@ -668,6 +679,16 @@ def logout():
 @app.route("/cookie-policy")
 def cookie_policy():
     return render_template("cookie_policy.html", title="Соглашение о cookies")
+
+
+@app.route("/me/settings")
+@login_required
+def me_layout_settings():
+    return render_template(
+        "user_dashboard_settings.html",
+        title="Настройка кабинета",
+        dashboard_widgets=DASHBOARD_WIDGETS,
+    )
 
 
 @app.route("/me", methods=["GET", "POST"])

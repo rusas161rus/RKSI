@@ -1,0 +1,192 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card dashboard-layout-controls">
+  <div class="dashboard-layout-controls__head">
+    <h2>Настройка личного кабинета</h2>
+    <button type="button" id="dashboardLayoutReset">Сбросить настройки</button>
+  </div>
+  <p class="meta">Включайте и отключайте блоки, задавайте размер и меняйте порядок кнопками "Выше"/"Ниже". Настройки сохраняются в браузере.</p>
+  <p class="meta"><a href="{{ url_for('me') }}">Открыть личный кабинет</a></p>
+  <div id="dashboardWidgetList" class="layout-widget-list"></div>
+</section>
+
+<script>
+  (function () {
+    var widgetList = document.getElementById('dashboardWidgetList');
+    var resetButton = document.getElementById('dashboardLayoutReset');
+    var storageKey = 'dashboard-layout-v2';
+    var sizeOptions = ['quarter', 'third', 'half', 'full'];
+    var widgets = {{ dashboard_widgets | tojson }};
+
+    if (!widgetList || !widgets || !widgets.length) {
+      return;
+    }
+
+    var widgetsById = {};
+    var defaultState = { order: [], hidden: {}, sizes: {} };
+
+    widgets.forEach(function (widget) {
+      var id = widget.id;
+      if (!id) return;
+      widgetsById[id] = widget;
+      defaultState.order.push(id);
+      defaultState.hidden[id] = false;
+      defaultState.sizes[id] = sizeOptions.indexOf(widget.default_size) >= 0 ? widget.default_size : 'half';
+    });
+
+    function cloneState(source) {
+      return JSON.parse(JSON.stringify(source));
+    }
+
+    function sanitizeState(rawState) {
+      var state = cloneState(defaultState);
+      if (!rawState || typeof rawState !== 'object') {
+        return state;
+      }
+
+      if (Array.isArray(rawState.order)) {
+        var used = {};
+        state.order = rawState.order.filter(function (id) {
+          if (!widgetsById[id] || used[id]) return false;
+          used[id] = true;
+          return true;
+        });
+        defaultState.order.forEach(function (id) {
+          if (!used[id]) state.order.push(id);
+        });
+      }
+
+      if (rawState.hidden && typeof rawState.hidden === 'object') {
+        Object.keys(state.hidden).forEach(function (id) {
+          state.hidden[id] = Boolean(rawState.hidden[id]);
+        });
+      }
+
+      if (rawState.sizes && typeof rawState.sizes === 'object') {
+        Object.keys(state.sizes).forEach(function (id) {
+          if (sizeOptions.indexOf(rawState.sizes[id]) >= 0) {
+            state.sizes[id] = rawState.sizes[id];
+          }
+        });
+      }
+
+      return state;
+    }
+
+    function loadState() {
+      try {
+        var raw = localStorage.getItem(storageKey);
+        if (!raw) return cloneState(defaultState);
+        return sanitizeState(JSON.parse(raw));
+      } catch (err) {
+        return cloneState(defaultState);
+      }
+    }
+
+    function saveState(state) {
+      try {
+        localStorage.setItem(storageKey, JSON.stringify(state));
+      } catch (err) {
+        return;
+      }
+    }
+
+    function moveWidget(state, id, direction) {
+      var currentIndex = state.order.indexOf(id);
+      if (currentIndex < 0) return;
+      var nextIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
+      if (nextIndex < 0 || nextIndex >= state.order.length) return;
+      var nextId = state.order[nextIndex];
+      state.order[nextIndex] = id;
+      state.order[currentIndex] = nextId;
+    }
+
+    function render(state) {
+      widgetList.innerHTML = '';
+      state.order.forEach(function (id, index) {
+        var widget = widgetsById[id];
+        if (!widget) return;
+
+        var row = document.createElement('div');
+        row.className = 'layout-widget-row';
+
+        var toggleLabel = document.createElement('label');
+        toggleLabel.className = 'layout-widget-row__toggle';
+        var visibilityCheckbox = document.createElement('input');
+        visibilityCheckbox.type = 'checkbox';
+        visibilityCheckbox.checked = !state.hidden[id];
+        var visibilityText = document.createElement('span');
+        visibilityText.textContent = widget.title || id;
+        toggleLabel.appendChild(visibilityCheckbox);
+        toggleLabel.appendChild(visibilityText);
+
+        var sizeSelect = document.createElement('select');
+        sizeSelect.className = 'layout-widget-row__size';
+        [
+          ['quarter', 'Компактный'],
+          ['third', 'Узкий'],
+          ['half', 'Средний'],
+          ['full', 'На всю ширину']
+        ].forEach(function (optionData) {
+          var option = document.createElement('option');
+          option.value = optionData[0];
+          option.textContent = optionData[1];
+          option.selected = state.sizes[id] === optionData[0];
+          sizeSelect.appendChild(option);
+        });
+
+        var actions = document.createElement('div');
+        actions.className = 'layout-widget-row__actions';
+        var upButton = document.createElement('button');
+        upButton.type = 'button';
+        upButton.textContent = 'Выше';
+        upButton.disabled = index === 0;
+        var downButton = document.createElement('button');
+        downButton.type = 'button';
+        downButton.textContent = 'Ниже';
+        downButton.disabled = index === state.order.length - 1;
+        actions.appendChild(upButton);
+        actions.appendChild(downButton);
+
+        row.appendChild(toggleLabel);
+        row.appendChild(sizeSelect);
+        row.appendChild(actions);
+        widgetList.appendChild(row);
+
+        visibilityCheckbox.addEventListener('change', function () {
+          state.hidden[id] = !visibilityCheckbox.checked;
+          saveState(state);
+        });
+
+        sizeSelect.addEventListener('change', function () {
+          state.sizes[id] = sizeSelect.value;
+          saveState(state);
+        });
+
+        upButton.addEventListener('click', function () {
+          moveWidget(state, id, 'up');
+          render(state);
+          saveState(state);
+        });
+
+        downButton.addEventListener('click', function () {
+          moveWidget(state, id, 'down');
+          render(state);
+          saveState(state);
+        });
+      });
+    }
+
+    var currentState = loadState();
+    render(currentState);
+
+    if (resetButton) {
+      resetButton.addEventListener('click', function () {
+        currentState = cloneState(defaultState);
+        render(currentState);
+        saveState(currentState);
+      });
+    }
+  })();
+</script>
+{% endblock %}
