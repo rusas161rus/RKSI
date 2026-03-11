@@ -904,6 +904,23 @@ th, td {
   margin-top: 0.7rem;
 }
 
+.ai-limit-note {
+  border: 1px solid color-mix(in srgb, var(--primary) 28%, var(--card-border));
+  border-radius: 10px;
+  padding: 0.65rem 0.75rem;
+  margin: 0.55rem 0 0.8rem;
+  background: color-mix(in srgb, var(--card-bg) 86%, var(--primary) 14%);
+}
+
+.ai-limit-note h3 {
+  margin: 0 0 0.35rem;
+  font-size: 1rem;
+}
+
+.ai-limit-note .meta strong {
+  color: var(--text);
+}
+
 .ai-quick-actions {
   display: flex;
   flex-wrap: wrap;

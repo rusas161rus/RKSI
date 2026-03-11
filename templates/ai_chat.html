@@ -15,6 +15,19 @@
   <p class="alert alert-error">Сервис ИИ временно недоступен: {{ llm_error }}</p>
   {% endif %}
 
+  <section class="ai-limit-note">
+    <h3>Лимит ИИ</h3>
+    {% if ai_access.is_admin %}
+    <p class="meta">Для администраторов лимит сообщений не применяется.</p>
+    {% else %}
+    <p class="meta">Лимит в день: <strong>{{ ai_access.daily_limit }}</strong> запросов.</p>
+    <p class="meta">Использовано сегодня: <strong>{{ ai_access.used_today }}</strong>. Осталось: <strong>{{ ai_access.remaining_today }}</strong>.</p>
+    {% if not ai_access.can_send_message %}
+    <p class="alert alert-error">Лимит ИИ на сегодня исчерпан. Новые запросы будут доступны после 00:00 (время сервера).</p>
+    {% endif %}
+    {% endif %}
+  </section>
+
   <form id="aiSettingsForm" class="grid-form ai-settings-form">
     <label class="inline-check">
       <input type="checkbox" id="allowNoteCreation" {% if ai_settings.allow_note_creation %}checked{% endif %} {% if not llm_ready %}disabled{% endif %} />
@@ -81,6 +94,7 @@
 <script>
   (function () {
     var llmReady = {{ llm_ready | tojson }};
+    var aiAccess = {{ ai_access | tojson }};
     var initialPendingNote = {{ pending_note | tojson }};
     var settingsForm = document.getElementById('aiSettingsForm');
     var allowNoteCreation = document.getElementById('allowNoteCreation');
@@ -263,6 +277,22 @@
       messageInput.disabled = true;
       setStatus('Сервис ИИ временно недоступен.');
       renderPendingNote(null);
+      chatLog.scrollTop = chatLog.scrollHeight;
+      return;
+    }
+
+    if (aiAccess && aiAccess.can_send_message === false) {
+      messageInput.disabled = true;
+      sendButton.disabled = true;
+      if (clearChatBtn) clearChatBtn.disabled = true;
+      if (quickActions) {
+        quickActions.querySelectorAll('button').forEach(function (btn) {
+          btn.disabled = true;
+        });
+        if (studySubjectSelect) studySubjectSelect.disabled = true;
+      }
+      setStatus(aiAccess.denied_reason || 'Лимит ИИ на сегодня исчерпан.');
+      renderPendingNote(initialPendingNote);
       chatLog.scrollTop = chatLog.scrollHeight;
       return;
     }
