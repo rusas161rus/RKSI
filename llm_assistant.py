@@ -20,6 +20,11 @@ QUICK_COMMANDS = {
     "/changes": "changes",
     "/quick changes": "changes",
 }
+STUDY_TRIGGERS = (
+    "план подготовки по ",
+    "план по предмету ",
+    "учебный план по ",
+)
 DATE_RE = re.compile(r"\b(\d{4}-\d{2}-\d{2})\b")
 
 
@@ -337,6 +342,19 @@ def _week_start(day: date) -> date:
     return day - timedelta(days=day.weekday())
 
 
+def _weekday_label(day: date) -> str:
+    names = {
+        0: "понедельник",
+        1: "вторник",
+        2: "среда",
+        3: "четверг",
+        4: "пятница",
+        5: "суббота",
+        6: "воскресенье",
+    }
+    return names.get(day.weekday(), "")
+
+
 def build_recent_changes_summary(user_id: int, hours: int = 24, limit: int = 25) -> str:
     group_id, group_name = _load_user_group(user_id)
     if not group_id:
@@ -386,6 +404,153 @@ def build_quick_reply(user_id: int, quick_command: str) -> tuple[str, dict[str, 
         text = build_recent_changes_summary(user_id, hours=24, limit=30)
         return text, {"quick_command": "changes", "window_hours": 24}
     return "Не понял быструю команду.", {"quick_command": "unknown"}
+
+
+def extract_study_subject(user_text: str) -> str | None:
+    text = _normalize_text(user_text)
+    if not text:
+        return None
+    lower = text.lower()
+
+    if lower.startswith("/study "):
+        return text[7:].strip()
+    if lower == "/study":
+        return ""
+
+    for trigger in STUDY_TRIGGERS:
+        idx = lower.find(trigger)
+        if idx >= 0:
+            return text[idx + len(trigger):].strip(" .,:;!?")
+
+    return None
+
+
+def _fetch_subject_lessons_for_week(user_id: int, subject_query: str, days: int = 7, limit: int = 120) -> tuple[date, date, list[tuple]]:
+    group_id, _ = _load_user_group(user_id)
+    if not group_id:
+        return date.today(), date.today(), []
+
+    start_day = date.today()
+    end_day = start_day + timedelta(days=max(1, days) - 1)
+    sql = """
+        SELECT x.lesson_date, x.start_time, x.end_time, x.subject_name, x.teacher_name, x.room
+        FROM (
+          SELECT s.lesson_date, s.start_time, s.end_time, subj.subject_name,
+                 COALESCE(t.full_name, '') AS teacher_name, COALESCE(s.room, t.room, '') AS room, s.group_id
+          FROM schedule_entries s
+          JOIN subjects subj ON subj.id = s.subject_id
+          LEFT JOIN teachers t ON t.id = s.teacher_id
+          UNION ALL
+          SELECT p.lesson_date, p.start_time, p.end_time, subj.subject_name,
+                 COALESCE(t.full_name, p.raw_teacher_name, '') AS teacher_name, COALESCE(p.room, t.room, '') AS room, p.group_id
+          FROM parsed_schedule_entries p
+          JOIN subjects subj ON subj.id = p.subject_id
+          LEFT JOIN teachers t ON t.id = p.teacher_id
+          UNION ALL
+          SELECT pt.lesson_date, pt.start_time, pt.end_time, subj.subject_name,
+                 COALESCE(t.full_name, pt.raw_teacher_name, '') AS teacher_name, COALESCE(pt.room, t.room, '') AS room, pt.group_id
+          FROM parsed_tabletka_schedule_entries pt
+          JOIN subjects subj ON subj.id = pt.subject_id
+          LEFT JOIN teachers t ON t.id = pt.teacher_id
+        ) x
+        WHERE x.lesson_date BETWEEN %s AND %s
+          AND x.group_id = %s
+          AND x.subject_name ILIKE %s
+        ORDER BY x.lesson_date, x.start_time NULLS LAST, x.end_time NULLS LAST, x.subject_name
+        LIMIT %s
+    """
+    with get_main_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, (start_day, end_day, group_id, f"%{subject_query}%", max(1, limit)))
+            rows = cur.fetchall()
+
+    deduped: list[tuple] = []
+    seen: set[tuple] = set()
+    for row in rows:
+        key = (row[0], row[1], row[2], row[3], row[4], row[5])
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(row)
+
+    return start_day, end_day, deduped
+
+
+def build_study_plan(user_id: int, subject_query: str) -> tuple[str, dict[str, Any]]:
+    subject_query = _normalize_text(subject_query)
+    if not subject_query:
+        return (
+            "Укажите предмет после команды, например: /study Математика",
+            {"study_plan": False, "study_subject": "", "study_error": "subject_missing"},
+        )
+
+    group_id, group_name = _load_user_group(user_id)
+    if not group_id:
+        return (
+            "Не могу построить план: в личном кабинете не выбрана основная группа.",
+            {"study_plan": False, "study_subject": subject_query, "study_error": "group_missing"},
+        )
+
+    start_day, end_day, rows = _fetch_subject_lessons_for_week(user_id, subject_query, days=7, limit=150)
+    if not rows:
+        text = (
+            f"По предмету «{subject_query}» на период {start_day.strftime('%d.%m.%Y')} - {end_day.strftime('%d.%m.%Y')} "
+            "занятий не найдено. Попробуйте более точное название предмета."
+        )
+        return text, {
+            "study_plan": False,
+            "study_subject": subject_query,
+            "date_from": start_day.isoformat(),
+            "date_to": end_day.isoformat(),
+            "lessons_count": 0,
+        }
+
+    subject_name = rows[0][3]
+    lessons_by_day: dict[date, list[tuple]] = {}
+    for row in rows:
+        lessons_by_day.setdefault(row[0], []).append(row)
+
+    days = [start_day + timedelta(days=i) for i in range((end_day - start_day).days + 1)]
+    lesson_days = sorted(lessons_by_day.keys())
+    first_lesson_day = lesson_days[0]
+
+    lines: list[str] = []
+    lines.append(f"План подготовки на неделю по предмету «{subject_name}» (группа {group_name or '-'}).")
+    lines.append(f"Период: {start_day.strftime('%d.%m.%Y')} - {end_day.strftime('%d.%m.%Y')}.")
+    lines.append("")
+
+    for day in days:
+        header = f"{day.strftime('%d.%m.%Y')} ({_weekday_label(day)})"
+        day_lessons = lessons_by_day.get(day, [])
+        if day_lessons:
+            lesson_parts: list[str] = []
+            for lesson in day_lessons:
+                time_text = _format_time_range(lesson[1], lesson[2])
+                room_text = f", ауд. {lesson[5]}" if lesson[5] else ""
+                lesson_parts.append(f"{time_text}{room_text}")
+            lines.append(f"{header}: пары по предмету ({'; '.join(lesson_parts)}).")
+            lines.append("- До пары: 20-25 минут на повторение теории и формул.")
+            lines.append("- После пары: 30-40 минут закрепления (конспект + 3-5 задач).")
+            lines.append("- Вечером: короткий чек-лист вопросов, которые остались непонятны.")
+        else:
+            if day < first_lesson_day:
+                lines.append(f"{header}: базовая подготовка 30-40 минут (теория + термины).")
+            elif day == end_day:
+                lines.append(f"{header}: итоговое повторение недели 40-60 минут и мини-самопроверка.")
+            else:
+                lines.append(f"{header}: поддерживающая сессия 20-30 минут (повтор и 2-3 задачи).")
+        lines.append("")
+
+    lines.append("Если хотите, могу на основе этого плана сразу подготовить набор заметок в ЛК.")
+    text = "\n".join(lines).strip()
+    meta = {
+        "study_plan": True,
+        "study_subject": subject_name,
+        "date_from": start_day.isoformat(),
+        "date_to": end_day.isoformat(),
+        "lessons_count": len(rows),
+    }
+    return text, meta
 
 
 def extract_search_query(user_text: str) -> str | None:
@@ -469,6 +634,7 @@ def build_ollama_messages(
         "Опирайся только на переданный контекст расписания. Если данных нет, честно скажи об этом. "
         "Если пользователь просит создать заметку, напомни формат: /note Заголовок | Текст | YYYY-MM-DD "
         "и то, что после этого нужно подтвердить действие. "
+        "Для недельного плана подготовки по предмету используй команду /study Название предмета. "
         f"Разрешение на создание заметок: {'включено' if can_create_note else 'выключено'}."
     )
     context_prompt = "Контекст расписания:\n" + schedule_context

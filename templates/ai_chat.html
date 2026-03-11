@@ -7,6 +7,7 @@
   </div>
   <p class="meta">Ассистент может смотреть расписание вашей группы, выполнять поиск по расписанию и по команде создавать заметки в ЛК.</p>
   <p class="meta">Формат заметки: <code>/note Заголовок | Текст | YYYY-MM-DD</code></p>
+  <p class="meta">Режим учебного плана: <code>/study Название предмета</code></p>
   {% if not llm_ready %}
   <p class="alert alert-error">Сервис ИИ временно недоступен: {{ llm_error }}</p>
   {% endif %}
@@ -26,6 +27,7 @@
     <button type="button" class="ai-quick-btn" data-command="/week" data-label="Покажи расписание на эту неделю" {% if not llm_ready %}disabled{% endif %}>Неделя</button>
     <button type="button" class="ai-quick-btn" data-command="/changes" data-label="Покажи изменения расписания с вчера" {% if not llm_ready %}disabled{% endif %}>Изменения с вчера</button>
     <button type="button" class="ai-quick-btn" data-command="__room__" data-label="Найти аудиторию" {% if not llm_ready %}disabled{% endif %}>Найти аудиторию</button>
+    <button type="button" class="ai-quick-btn" data-command="__study__" data-label="Собери план подготовки по предмету" {% if not llm_ready %}disabled{% endif %}>План по предмету</button>
   </div>
 
   <section id="pendingNoteBox" class="ai-pending-note {% if not pending_note %}is-hidden{% endif %}">
@@ -261,6 +263,13 @@
             roomText = (roomText || '').trim();
             if (!roomText) return;
             sendMessage('/search ' + roomText, 'Найти аудиторию: ' + roomText);
+            return;
+          }
+          if (command === '__study__') {
+            var subjectText = window.prompt('Введите предмет для плана подготовки (например, Математика):', '');
+            subjectText = (subjectText || '').trim();
+            if (!subjectText) return;
+            sendMessage('/study ' + subjectText, 'План подготовки по предмету: ' + subjectText);
             return;
           }
           sendMessage(command, label);

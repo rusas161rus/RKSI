@@ -13,6 +13,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from db import ensure_schedule_room_columns, get_main_conn, is_composite_teacher_name
 from llm_assistant import (
     build_quick_reply,
+    build_study_plan,
     build_default_schedule_context,
     build_ollama_messages,
     call_ollama_chat,
@@ -21,6 +22,7 @@ from llm_assistant import (
     extract_quick_command,
     extract_note_payload,
     extract_search_query,
+    extract_study_subject,
     fetch_chat_messages,
     get_pending_note,
     fetch_schedule_context,
@@ -787,6 +789,12 @@ def api_ai_chat():
     quick_command = extract_quick_command(message_text)
     if quick_command:
         reply, meta = build_quick_reply(user_id, quick_command)
+        save_chat_message(chat_session_id, "assistant", reply, meta)
+        return jsonify({"ok": True, "reply": reply, "meta": meta})
+
+    study_subject = extract_study_subject(message_text)
+    if study_subject is not None:
+        reply, meta = build_study_plan(user_id, study_subject)
         save_chat_message(chat_session_id, "assistant", reply, meta)
         return jsonify({"ok": True, "reply": reply, "meta": meta})
 
