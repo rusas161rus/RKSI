@@ -272,18 +272,13 @@ def fetch_group_subject_options(user_id: int, limit: int = 300) -> list[str]:
                   FROM parsed_schedule_entries p
                   JOIN subjects subj ON subj.id = p.subject_id
                   WHERE p.group_id = %s
-                  UNION
-                  SELECT subj.subject_name
-                  FROM parsed_tabletka_schedule_entries pt
-                  JOIN subjects subj ON subj.id = pt.subject_id
-                  WHERE pt.group_id = %s
                 ) x
                 WHERE x.subject_name IS NOT NULL
                   AND btrim(x.subject_name) <> ''
                 ORDER BY x.subject_name
                 LIMIT %s
                 """,
-                (group_id, group_id, group_id, max(1, limit)),
+                (group_id, group_id, max(1, limit)),
             )
             rows = cur.fetchall()
     return [row[0] for row in rows if (row[0] or "").strip()]
@@ -483,12 +478,6 @@ def _fetch_subject_lessons_for_week(user_id: int, subject_query: str, days: int 
           FROM parsed_schedule_entries p
           JOIN subjects subj ON subj.id = p.subject_id
           LEFT JOIN teachers t ON t.id = p.teacher_id
-          UNION ALL
-          SELECT pt.lesson_date, pt.start_time, pt.end_time, subj.subject_name,
-                 COALESCE(t.full_name, pt.raw_teacher_name, '') AS teacher_name, COALESCE(pt.room, t.room, '') AS room, pt.group_id
-          FROM parsed_tabletka_schedule_entries pt
-          JOIN subjects subj ON subj.id = pt.subject_id
-          LEFT JOIN teachers t ON t.id = pt.teacher_id
         ) x
         WHERE x.lesson_date BETWEEN %s AND %s
           AND x.group_id = %s
