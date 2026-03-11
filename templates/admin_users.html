@@ -3,6 +3,7 @@
 <section class="card">
   <h2>Пользователи</h2>
   <p>Управление пользователями, правами администратора и доступом к ИИ.</p>
+  <p class="meta">Лимит ИИ в день: максимум сообщений пользователя в ИИ за календарные сутки. Счётчик «Использовано сегодня» обновляется при каждом запросе и сбрасывается в 00:00 по времени сервера.</p>
 </section>
 
 <section class="card">
@@ -40,6 +41,7 @@
 
 <section class="card">
   <h3>Список пользователей</h3>
+  <p class="meta">Изменение чекбоксов «Админ» и «ИИ» применяется кнопкой «Сохранить» в строке пользователя.</p>
 
   <form method="get" class="grid-form users-filter-form">
     <label>Фильтр по роли
@@ -79,7 +81,7 @@
         <th><button type="button" class="users-group-toggle" data-group-field="group">Группа</button></th>
         <th><button type="button" class="users-group-toggle" data-group-field="role">Роль</button></th>
         <th>ИИ</th>
-        <th>Лимит/день</th>
+        <th>Лимит/день (запросов)</th>
         <th>Использовано сегодня</th>
         <th>Действия</th>
       </tr>
@@ -103,27 +105,18 @@
           <td>{{ ai_limit }}</td>
           <td>{{ ai_used }}</td>
           <td class="users-actions">
-            <form method="post">
-              <input type="hidden" name="action" value="toggle_admin" />
-              <input type="hidden" name="target_user_id" value="{{ u[0] }}" />
-              <input type="hidden" name="make_admin" value="{{ 0 if u[4] else 1 }}" />
-              <input type="hidden" name="users_role" value="{{ users_role }}" />
-              <input type="hidden" name="users_group_id" value="{{ users_group_id_filter }}" />
-              <input type="hidden" name="users_group_by" value="{{ users_group_by }}" />
-              <button type="submit">{{ 'Снять права админа' if u[4] else 'Выдать права админа' }}</button>
-            </form>
-
-            <form method="post" class="grid-form compact-form" style="min-width: 280px;">
-              <input type="hidden" name="action" value="save_user_ai_access" />
+            <form method="post" class="users-access-form">
+              <input type="hidden" name="action" value="save_user_access" />
               <input type="hidden" name="target_user_id" value="{{ u[0] }}" />
               <input type="hidden" name="users_role" value="{{ users_role }}" />
               <input type="hidden" name="users_group_id" value="{{ users_group_id_filter }}" />
               <input type="hidden" name="users_group_by" value="{{ users_group_by }}" />
+              <label class="inline-check"><input type="checkbox" name="is_admin" {% if u[4] %}checked{% endif %} /> Админ</label>
               <label class="inline-check"><input type="checkbox" name="ai_enabled" {% if ai_enabled %}checked{% endif %} /> ИИ</label>
               <label>Лимит
                 <input type="number" name="ai_daily_limit" value="{{ ai_limit }}" min="1" step="1" required />
               </label>
-              <button type="submit">Сохранить ИИ</button>
+              <button type="submit">Сохранить</button>
             </form>
 
             <form method="post" onsubmit="return confirm('Удалить пользователя ID {{ u[0] }}?');">

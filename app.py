@@ -2222,23 +2222,28 @@ def admin_users():
                     else:
                         flash("Укажите логин и пароль.", "error")
 
-                elif action == "toggle_admin":
+                elif action == "save_user_access":
                     uid = (request.form.get("target_user_id") or "").strip()
-                    make_admin = request.form.get("make_admin") == "1"
-                    if uid.isdigit():
-                        if make_admin:
-                            cur.execute("INSERT INTO site_admins(user_id) VALUES (%s) ON CONFLICT (user_id) DO NOTHING", (uid,))
-                        else:
-                            cur.execute("DELETE FROM site_admins WHERE user_id = %s", (uid,))
-                        flash("Права админа выданы." if make_admin else "Права админа сняты.", "success")
-                    else:
-                        flash("Укажите корректный ID пользователя.", "error")
-
-                elif action == "save_user_ai_access":
-                    uid = (request.form.get("target_user_id") or "").strip()
+                    make_admin = request.form.get("is_admin") == "on"
                     ai_enabled = request.form.get("ai_enabled") == "on"
                     ai_daily_limit = parse_ai_daily_limit(request.form.get("ai_daily_limit"), DEFAULT_AI_DAILY_LIMIT)
                     if uid.isdigit():
+                        target_user_id = int(uid)
+                        if make_admin:
+                            cur.execute("INSERT INTO site_admins(user_id) VALUES (%s) ON CONFLICT (user_id) DO NOTHING", (target_user_id,))
+                        else:
+                            if target_user_id == int(session["user_id"]):
+                                flash("Нельзя снять права админа у текущего авторизованного пользователя.", "error")
+                                return redirect(
+                                    url_for(
+                                        "admin_users",
+                                        users_role=(request.form.get("users_role") or None),
+                                        users_group_id=(request.form.get("users_group_id") or None),
+                                        users_group_by=(request.form.get("users_group_by") or None),
+                                    )
+                                )
+                            cur.execute("DELETE FROM site_admins WHERE user_id = %s", (target_user_id,))
+
                         cur.execute(
                             """
                             UPDATE site_users
@@ -2247,9 +2252,9 @@ def admin_users():
                                 updated_at = now()
                             WHERE id = %s
                             """,
-                            (ai_enabled, ai_daily_limit, int(uid)),
+                            (ai_enabled, ai_daily_limit, target_user_id),
                         )
-                        flash("Права ИИ обновлены." if cur.rowcount else "Пользователь не найден.", "success" if cur.rowcount else "error")
+                        flash("Права пользователя обновлены." if cur.rowcount else "Пользователь не найден.", "success" if cur.rowcount else "error")
                     else:
                         flash("Укажите корректный ID пользователя.", "error")
 

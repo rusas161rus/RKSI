@@ -603,6 +603,26 @@ th, td {
   margin: 0;
 }
 
+.users-access-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.users-access-form label {
+  margin: 0;
+}
+
+.users-access-form input[type='number'] {
+  width: 88px;
+}
+
+.users-access-form button {
+  min-height: 2.2rem;
+  padding: 0.38rem 0.72rem;
+}
+
 .dashboard-layout-controls__head {
   display: flex;
   justify-content: space-between;
