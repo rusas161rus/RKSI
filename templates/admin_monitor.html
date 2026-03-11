@@ -1,4 +1,4 @@
-﻿{% extends "base.html" %}
+{% extends "base.html" %}
 {% block content %}
 <section class="card monitor-hero">
   <h2>Мониторинг</h2>
@@ -48,6 +48,28 @@
   </article>
 </section>
 
+<section class="monitor-history-grid">
+  <article class="card monitor-history-card">
+    <div class="monitor-history-card__head">
+      <h3>CPU (график)</h3>
+      <p class="meta" id="monitorCpuHistoryStats">Тек: — · Мин: — · Сред: — · Макс: — · Порог: 70%</p>
+    </div>
+    <div class="monitor-plot-shell">
+      <canvas id="monitorCpuHistoryCanvas" width="960" height="260" aria-label="История загрузки CPU"></canvas>
+    </div>
+  </article>
+
+  <article class="card monitor-history-card">
+    <div class="monitor-history-card__head">
+      <h3>Память (график)</h3>
+      <p class="meta" id="monitorMemHistoryStats">Тек: — · Мин: — · Сред: — · Макс: — · Порог: 80%</p>
+    </div>
+    <div class="monitor-plot-shell">
+      <canvas id="monitorMemHistoryCanvas" width="960" height="260" aria-label="История использования памяти"></canvas>
+    </div>
+  </article>
+</section>
+
 <script>
   (function () {
     var appTimeNode = document.getElementById('monitorAppTime');
@@ -62,6 +84,15 @@
     var netRxNode = document.getElementById('monitorNetRx');
     var netTxNode = document.getElementById('monitorNetTx');
     var platformNode = document.getElementById('monitorPlatform');
+    var cpuHistoryCanvas = document.getElementById('monitorCpuHistoryCanvas');
+    var memHistoryCanvas = document.getElementById('monitorMemHistoryCanvas');
+    var cpuHistoryStatsNode = document.getElementById('monitorCpuHistoryStats');
+    var memHistoryStatsNode = document.getElementById('monitorMemHistoryStats');
+    var cpuHistory = [];
+    var memHistory = [];
+    var HISTORY_LIMIT = 180;
+    var CPU_THRESHOLD = 70;
+    var MEM_THRESHOLD = 80;
 
     function toNumber(value) {
       var n = Number(value);
@@ -101,6 +132,182 @@
       node.style.width = safe.toFixed(2) + '%';
     }
 
+    function formatTimeLabel(ts) {
+      var d = new Date(ts);
+      var hh = String(d.getHours()).padStart(2, '0');
+      var mm = String(d.getMinutes()).padStart(2, '0');
+      return hh + ':' + mm;
+    }
+
+    function formatPercent(value) {
+      var n = toNumber(value);
+      return n === null ? '—' : n.toFixed(2) + '%';
+    }
+
+    function pushHistoryPoint(list, value) {
+      var n = toNumber(value);
+      if (n === null) return;
+      list.push({
+        ts: Date.now(),
+        value: Math.max(0, Math.min(100, n))
+      });
+      if (list.length > HISTORY_LIMIT) list.splice(0, list.length - HISTORY_LIMIT);
+    }
+
+    function getHistoryStats(list) {
+      if (!list.length) return null;
+      var sum = 0;
+      var min = list[0].value;
+      var max = list[0].value;
+      for (var i = 0; i < list.length; i += 1) {
+        var current = list[i].value;
+        sum += current;
+        if (current < min) min = current;
+        if (current > max) max = current;
+      }
+      return {
+        current: list[list.length - 1].value,
+        min: min,
+        avg: sum / list.length,
+        max: max
+      };
+    }
+
+    function renderHistoryStats(node, list, threshold) {
+      if (!node) return;
+      var stats = getHistoryStats(list);
+      if (!stats) {
+        node.textContent = 'Тек: — · Мин: — · Сред: — · Макс: — · Порог: ' + threshold + '%';
+        return;
+      }
+      node.textContent = 'Тек: ' + formatPercent(stats.current) +
+        ' · Мин: ' + formatPercent(stats.min) +
+        ' · Сред: ' + formatPercent(stats.avg) +
+        ' · Макс: ' + formatPercent(stats.max) +
+        ' · Порог: ' + threshold + '%';
+    }
+
+    function drawHistoryGraph(canvas, list, threshold, lineColor, thresholdColor) {
+      if (!canvas) return;
+      var ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      var cssWidth = canvas.clientWidth || 960;
+      var cssHeight = canvas.clientHeight || 260;
+      var dpr = window.devicePixelRatio || 1;
+      var width = Math.floor(cssWidth * dpr);
+      var height = Math.floor(cssHeight * dpr);
+
+      if (canvas.width !== width || canvas.height !== height) {
+        canvas.width = width;
+        canvas.height = height;
+      }
+
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, cssWidth, cssHeight);
+
+      var plot = { left: 42, top: 12, right: 10, bottom: 26 };
+      var graphWidth = cssWidth - plot.left - plot.right;
+      var graphHeight = cssHeight - plot.top - plot.bottom;
+      if (graphWidth <= 0 || graphHeight <= 0) return;
+
+      ctx.fillStyle = '#1f2734';
+      ctx.fillRect(plot.left, plot.top, graphWidth, graphHeight);
+
+      ctx.strokeStyle = 'rgba(148, 163, 184, 0.22)';
+      ctx.lineWidth = 1;
+      for (var yTick = 0; yTick <= 10; yTick += 1) {
+        var y = plot.top + (graphHeight / 10) * yTick;
+        ctx.beginPath();
+        ctx.moveTo(plot.left, y);
+        ctx.lineTo(plot.left + graphWidth, y);
+        ctx.stroke();
+      }
+      for (var xTick = 0; xTick <= 12; xTick += 1) {
+        var x = plot.left + (graphWidth / 12) * xTick;
+        ctx.beginPath();
+        ctx.moveTo(x, plot.top);
+        ctx.lineTo(x, plot.top + graphHeight);
+        ctx.stroke();
+      }
+
+      ctx.fillStyle = 'rgba(203, 213, 225, 0.86)';
+      ctx.font = '11px Arial, sans-serif';
+      for (var percentTick = 0; percentTick <= 5; percentTick += 1) {
+        var val = 100 - (percentTick * 20);
+        var labelY = plot.top + (graphHeight * percentTick / 5) + 4;
+        ctx.fillText(String(val) + '%', 6, labelY);
+      }
+
+      var startTs = list.length ? list[0].ts : (Date.now() - ((HISTORY_LIMIT - 1) * 5000));
+      var endTs = list.length ? list[list.length - 1].ts : Date.now();
+      var xLabelTicks = 4;
+      ctx.fillStyle = 'rgba(203, 213, 225, 0.76)';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      for (var labelTick = 0; labelTick <= xLabelTicks; labelTick += 1) {
+        var ratio = labelTick / xLabelTicks;
+        var xLabelPos = plot.left + (graphWidth * ratio);
+        var labelTs = startTs + ((endTs - startTs) * ratio);
+        ctx.fillText(formatTimeLabel(labelTs), xLabelPos, plot.top + graphHeight + 4);
+      }
+      ctx.textAlign = 'start';
+      ctx.textBaseline = 'alphabetic';
+
+      var thresholdValue = Math.max(0, Math.min(100, threshold));
+      var thresholdY = plot.top + (1 - thresholdValue / 100) * graphHeight;
+      ctx.save();
+      ctx.setLineDash([6, 4]);
+      ctx.strokeStyle = thresholdColor;
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(plot.left, thresholdY);
+      ctx.lineTo(plot.left + graphWidth, thresholdY);
+      ctx.stroke();
+      ctx.restore();
+
+      if (!list.length) return;
+
+      ctx.save();
+      ctx.beginPath();
+      for (var i = 0; i < list.length; i += 1) {
+        var xPoint = plot.left + (list.length === 1 ? graphWidth : (i * graphWidth / (list.length - 1)));
+        var yPoint = plot.top + (1 - list[i].value / 100) * graphHeight;
+        if (i === 0) ctx.moveTo(xPoint, yPoint);
+        else ctx.lineTo(xPoint, yPoint);
+      }
+      ctx.lineTo(plot.left + graphWidth, plot.top + graphHeight);
+      ctx.lineTo(plot.left, plot.top + graphHeight);
+      ctx.closePath();
+      var fillGradient = ctx.createLinearGradient(0, plot.top, 0, plot.top + graphHeight);
+      fillGradient.addColorStop(0, 'rgba(34, 197, 94, 0.34)');
+      fillGradient.addColorStop(1, 'rgba(34, 197, 94, 0.03)');
+      ctx.fillStyle = fillGradient;
+      ctx.fill();
+      ctx.restore();
+
+      ctx.beginPath();
+      for (var j = 0; j < list.length; j += 1) {
+        var xx = plot.left + (list.length === 1 ? graphWidth : (j * graphWidth / (list.length - 1)));
+        var yy = plot.top + (1 - list[j].value / 100) * graphHeight;
+        if (j === 0) ctx.moveTo(xx, yy);
+        else ctx.lineTo(xx, yy);
+      }
+      ctx.strokeStyle = lineColor;
+      ctx.lineWidth = 2;
+      ctx.shadowColor = 'rgba(34, 197, 94, 0.45)';
+      ctx.shadowBlur = 6;
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+    }
+
+    function renderHistoryCharts() {
+      drawHistoryGraph(cpuHistoryCanvas, cpuHistory, CPU_THRESHOLD, '#2bf06d', 'rgba(96, 165, 250, 0.9)');
+      drawHistoryGraph(memHistoryCanvas, memHistory, MEM_THRESHOLD, '#60f08a', 'rgba(248, 113, 113, 0.9)');
+      renderHistoryStats(cpuHistoryStatsNode, cpuHistory, CPU_THRESHOLD);
+      renderHistoryStats(memHistoryStatsNode, memHistory, MEM_THRESHOLD);
+    }
+
     function render(data) {
       if (!data) return;
       if (appTimeNode && data.app_time_text) appTimeNode.textContent = data.app_time_text;
@@ -110,20 +317,24 @@
 
       var cpuPercent = toNumber(data.cpu_percent);
       if (cpuNode) cpuNode.textContent = cpuPercent === null ? '—' : cpuPercent.toFixed(2) + ' %';
-      setBar(cpuBarNode, cpuPercent || 0);
+      setBar(cpuBarNode, cpuPercent === null ? 0 : cpuPercent);
 
       var memUsed = toNumber(data.memory_used_bytes);
       var memTotal = toNumber(data.memory_total_bytes);
-      var memPercent = (memUsed !== null && memTotal && memTotal > 0) ? ((memUsed / memTotal) * 100) : 0;
+      var memPercent = (memUsed !== null && memTotal && memTotal > 0) ? ((memUsed / memTotal) * 100) : null;
       if (memUsedNode) memUsedNode.textContent = memUsed === null ? '—' : formatBytes(memUsed);
       if (memTotalNode) {
         memTotalNode.textContent = memTotal === null ? '—' : ('Всего: ' + formatBytes(memTotal));
       }
-      setBar(memBarNode, memPercent);
+      setBar(memBarNode, memPercent === null ? 0 : memPercent);
 
       if (netRxNode) netRxNode.textContent = formatSpeed(data.network_rx_bps);
       if (netTxNode) netTxNode.textContent = formatSpeed(data.network_tx_bps);
       if (platformNode && data.platform) platformNode.textContent = data.platform;
+
+      pushHistoryPoint(cpuHistory, cpuPercent);
+      pushHistoryPoint(memHistory, memPercent);
+      renderHistoryCharts();
     }
 
     function poll() {
@@ -155,6 +366,7 @@
 
     poll();
     window.setInterval(poll, 5000);
+    window.addEventListener('resize', renderHistoryCharts);
   })();
 </script>
 {% endblock %}
