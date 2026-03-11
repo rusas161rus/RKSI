@@ -72,33 +72,33 @@
       <button type="submit">Сохранить настройки Telegram</button>
     </form>
   </section>
-</div>
 
-<section class="card">
-  <h3>Избранные преподаватели</h3>
-  {% if favorite_teachers %}
-    <div class="chip-list">
-      {% for teacher in favorite_teachers %}
-      <form method="get" class="chip-form">
-        <input type="hidden" name="date" value="{{ selected_date }}" />
-        <input type="hidden" name="period" value="{{ selected_period }}" />
-        <input type="hidden" name="q" value="{{ search_query }}" />
-        <input type="hidden" name="source" value="{{ source_mode }}" />
-        <input type="hidden" name="all_groups" value="{{ 1 if all_groups else 0 }}" />
-        <button type="submit" name="teacher_id" value="{{ teacher.id }}" class="chip-button">{{ teacher.full_name }}</button>
-      </form>
-      <form method="post" class="chip-form chip-form--remove">
-        {{ preserve_filters() }}
-        <input type="hidden" name="profile_action" value="toggle_favorite_teacher" />
-        <input type="hidden" name="favorite_teacher_id" value="{{ teacher.id }}" />
-        <button type="submit" class="danger">Убрать</button>
-      </form>
-      {% endfor %}
-    </div>
-  {% else %}
-    <p class="meta">Пока пусто. Ниже в расписании можно добавлять преподавателей в избранное.</p>
-  {% endif %}
-</section>
+  <section class="card card--favorites">
+    <h3>Избранные преподаватели</h3>
+    {% if favorite_teachers %}
+      <div class="chip-list">
+        {% for teacher in favorite_teachers %}
+        <form method="get" class="chip-form">
+          <input type="hidden" name="date" value="{{ selected_date }}" />
+          <input type="hidden" name="period" value="{{ selected_period }}" />
+          <input type="hidden" name="q" value="{{ search_query }}" />
+          <input type="hidden" name="source" value="{{ source_mode }}" />
+          <input type="hidden" name="all_groups" value="{{ 1 if all_groups else 0 }}" />
+          <button type="submit" name="teacher_id" value="{{ teacher.id }}" class="chip-button">{{ teacher.full_name }}</button>
+        </form>
+        <form method="post" class="chip-form chip-form--remove">
+          {{ preserve_filters() }}
+          <input type="hidden" name="profile_action" value="toggle_favorite_teacher" />
+          <input type="hidden" name="favorite_teacher_id" value="{{ teacher.id }}" />
+          <button type="submit" class="danger">Убрать</button>
+        </form>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="meta">Пока пусто. Ниже в расписании можно добавлять преподавателей в избранное.</p>
+    {% endif %}
+  </section>
+</div>
 
 <div class="dashboard-grid dashboard-grid--paired">
   <section class="card">

@@ -514,6 +514,14 @@ th, td {
   .dictionary-grid {
     grid-template-columns: 1fr;
   }
+
+  .profile-grid--top {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .profile-grid--top .card--favorites {
+    grid-column: 1 / -1;
+  }
 }
 
 .profile-grid,
@@ -524,8 +532,13 @@ th, td {
   margin-bottom: 1rem;
 }
 
+.profile-grid > .card,
+.dashboard-grid > .card {
+  margin-bottom: 0;
+}
+
 .profile-grid--top {
-  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr) minmax(0, 1fr);
   align-items: start;
 }
 
