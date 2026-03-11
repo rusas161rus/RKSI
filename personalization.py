@@ -688,10 +688,37 @@ def detect_and_record_schedule_changes(group_ids: list[int] | None = None) -> in
 
 def format_schedule_rows_for_bot(rows: list[dict[str, Any]], title: str) -> str:
     if not rows:
-        return f"{title}\nЗанятий не найдено."
+        return f"{title}\n\nЗанятий не найдено."
+
+    merged_rows: list[dict[str, Any]] = []
+    merged_map: dict[tuple[Any, Any, Any, str, str, str], dict[str, Any]] = {}
+    for row in rows:
+        key = (
+            row["lesson_date"],
+            row["start_time"],
+            row["end_time"],
+            row["subject_name"],
+            row.get("teacher_name") or "",
+            row.get("room") or "",
+        )
+        source_title = SOURCE_TITLES.get(row["source"], row["source"])
+        if key not in merged_map:
+            merged_map[key] = {
+                "lesson_date": row["lesson_date"],
+                "start_time": row["start_time"],
+                "end_time": row["end_time"],
+                "subject_name": row["subject_name"],
+                "teacher_name": row.get("teacher_name") or "",
+                "room": row.get("room") or "",
+                "sources": [source_title],
+            }
+            merged_rows.append(merged_map[key])
+        elif source_title not in merged_map[key]["sources"]:
+            merged_map[key]["sources"].append(source_title)
+
     lines = [title]
     current_day = None
-    for row in rows:
+    for row in merged_rows:
         day_text = row["lesson_date"].strftime("%d.%m.%Y")
         if day_text != current_day:
             current_day = day_text
@@ -703,13 +730,16 @@ def format_schedule_rows_for_bot(rows: list[dict[str, Any]], title: str) -> str:
             time_text = row["start_time"].strftime("%H:%M")
         else:
             time_text = "без времени"
-        detail = row["subject_name"]
+        lines.append(f"• {time_text}")
+        lines.append(f"  {row['subject_name']}")
+        details: list[str] = []
         if row["teacher_name"]:
-            detail += f" | {row['teacher_name']}"
+            details.append(row["teacher_name"])
         if row["room"]:
-            detail += f" | ауд. {row['room']}"
-        detail += f" | {SOURCE_TITLES.get(row['source'], row['source'])}"
-        lines.append(f"{time_text} | {detail}")
+            details.append(f"ауд. {row['room']}")
+        if details:
+            lines.append(f"  {' | '.join(details)}")
+        lines.append(f"  Источник: {', '.join(row['sources'])}")
     return "\n".join(lines)
 
 
@@ -741,11 +771,14 @@ def _build_reply_keyboard(linked: bool) -> dict[str, Any]:
     return {"keyboard": [[{"text": "Сегодня"}, {"text": "Завтра"}], [{"text": "Неделя"}, {"text": "Изменения"}], [{"text": "Личный кабинет"}]], "resize_keyboard": True}
 
 
-def _send_telegram_message(settings: dict[str, Any], chat_id: int, text: str, linked: bool = True) -> None:
+def _send_telegram_message(settings: dict[str, Any], chat_id: int, text: str, linked: bool = True, append_site_links: bool = False) -> None:
+    if append_site_links:
+        text = f"{text}{_build_site_links_text(settings)}"
     payload: dict[str, Any] = {
         "chat_id": chat_id,
-        "text": f"{text}{_build_site_links_text(settings)}"[:4096],
+        "text": text[:4096],
         "reply_markup": _build_reply_keyboard(linked),
+        "disable_web_page_preview": True,
     }
     _telegram_api(settings, "sendMessage", payload)
 
@@ -784,7 +817,13 @@ def _schedule_title(prefix: str, user: dict[str, Any]) -> str:
 def _handle_linked_command(settings: dict[str, Any], chat_id: int, user: dict[str, Any], text: str) -> None:
     lowered = (text or "").strip().lower()
     if lowered in {"/start", "/help"}:
-        _send_telegram_message(settings, chat_id, f"Здравствуйте, {user['full_name'] or user['username']}. Бот готов показывать расписание и уведомления.", linked=True)
+        _send_telegram_message(
+            settings,
+            chat_id,
+            f"Здравствуйте, {user['full_name'] or user['username']}. Бот готов показывать расписание и уведомления.",
+            linked=True,
+            append_site_links=True,
+        )
         return
     if lowered == "личный кабинет":
         base_url = settings.get("site_base_url") or ""
@@ -801,7 +840,10 @@ def _handle_linked_command(settings: dict[str, Any], chat_id: int, user: dict[st
         lines = ["Последние изменения:"]
         for event in events:
             detected_at = event["detected_at"].strftime("%d.%m %H:%M") if event["detected_at"] else ""
-            lines.append(f"- {event['event_text']} [{detected_at}]")
+            if detected_at:
+                lines.append(f"• {detected_at} — {event['event_text']}")
+            else:
+                lines.append(f"• {event['event_text']}")
         _send_telegram_message(settings, chat_id, "\n".join(lines), linked=True)
         return
     if not user.get("preferred_group_id"):
