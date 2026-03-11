@@ -70,6 +70,33 @@
   </article>
 </section>
 
+<section class="card monitor-admins-card">
+  <div class="monitor-admins-card__head">
+    <h3>Админы онлайн</h3>
+    <p class="meta">Сейчас онлайн: <strong id="monitorOnlineAdminsCount">{{ online_admins|length }}</strong></p>
+  </div>
+  <p class="meta">Активность админов за последние {{ online_window_minutes }} мин.</p>
+  {% if online_admin_error %}
+  <p class="alert alert-error" id="monitorOnlineAdminsError">Ошибка списка админов: {{ online_admin_error }}</p>
+  {% else %}
+  <p class="alert alert-error" id="monitorOnlineAdminsError" hidden></p>
+  {% endif %}
+  <ul class="monitor-admin-list" id="monitorOnlineAdminsList">
+    {% if online_admins %}
+      {% for admin in online_admins %}
+      <li class="monitor-admin-list__item">
+        <span class="monitor-admin-name">{{ admin.display_name }}</span>
+        {% if admin.username and admin.username != admin.display_name %}
+        <span class="meta">{{ admin.username }}</span>
+        {% endif %}
+      </li>
+      {% endfor %}
+    {% else %}
+      <li class="meta monitor-admin-list__empty">Нет админов онлайн.</li>
+    {% endif %}
+  </ul>
+</section>
+
 <script>
   (function () {
     var appTimeNode = document.getElementById('monitorAppTime');
@@ -88,6 +115,9 @@
     var memHistoryCanvas = document.getElementById('monitorMemHistoryCanvas');
     var cpuHistoryStatsNode = document.getElementById('monitorCpuHistoryStats');
     var memHistoryStatsNode = document.getElementById('monitorMemHistoryStats');
+    var onlineAdminsCountNode = document.getElementById('monitorOnlineAdminsCount');
+    var onlineAdminsListNode = document.getElementById('monitorOnlineAdminsList');
+    var onlineAdminsErrorNode = document.getElementById('monitorOnlineAdminsError');
     var cpuHistory = [];
     var memHistory = [];
     var HISTORY_LIMIT = 180;
@@ -142,6 +172,51 @@
     function formatPercent(value) {
       var n = toNumber(value);
       return n === null ? '—' : n.toFixed(2) + '%';
+    }
+
+    function renderOnlineAdmins(admins) {
+      if (!onlineAdminsListNode) return;
+      var list = Array.isArray(admins) ? admins : [];
+      if (onlineAdminsCountNode) onlineAdminsCountNode.textContent = String(list.length);
+
+      onlineAdminsListNode.textContent = '';
+      if (!list.length) {
+        var emptyNode = document.createElement('li');
+        emptyNode.className = 'meta monitor-admin-list__empty';
+        emptyNode.textContent = 'Нет админов онлайн.';
+        onlineAdminsListNode.appendChild(emptyNode);
+        return;
+      }
+
+      list.forEach(function (admin) {
+        var item = document.createElement('li');
+        item.className = 'monitor-admin-list__item';
+
+        var displayName = document.createElement('span');
+        displayName.className = 'monitor-admin-name';
+        displayName.textContent = admin && admin.display_name ? String(admin.display_name) : 'Админ';
+        item.appendChild(displayName);
+
+        if (admin && admin.username && admin.username !== admin.display_name) {
+          var username = document.createElement('span');
+          username.className = 'meta';
+          username.textContent = String(admin.username);
+          item.appendChild(username);
+        }
+
+        onlineAdminsListNode.appendChild(item);
+      });
+    }
+
+    function renderOnlineAdminsError(errorText) {
+      if (!onlineAdminsErrorNode) return;
+      if (errorText) {
+        onlineAdminsErrorNode.hidden = false;
+        onlineAdminsErrorNode.textContent = 'Ошибка списка админов: ' + String(errorText);
+      } else {
+        onlineAdminsErrorNode.hidden = true;
+        onlineAdminsErrorNode.textContent = '';
+      }
     }
 
     function pushHistoryPoint(list, value) {
@@ -314,6 +389,8 @@
       if (appUptimeNode) appUptimeNode.textContent = formatDuration(data.app_uptime_seconds);
       if (serverUptimeNode) serverUptimeNode.textContent = formatDuration(data.server_uptime_seconds);
       if (onlineUsersNode && data.online_users !== undefined) onlineUsersNode.textContent = String(data.online_users);
+      renderOnlineAdmins(data.online_admins);
+      renderOnlineAdminsError(data.online_admin_error);
 
       var cpuPercent = toNumber(data.cpu_percent);
       if (cpuNode) cpuNode.textContent = cpuPercent === null ? '—' : cpuPercent.toFixed(2) + ' %';
@@ -344,7 +421,9 @@
           if (!payload || !payload.ok) return;
           var merged = Object.assign({}, payload.metrics || {}, {
             online_users: payload.online_users,
-            online_window_minutes: payload.online_window_minutes
+            online_window_minutes: payload.online_window_minutes,
+            online_admins: payload.online_admins,
+            online_admin_error: payload.online_admin_error
           });
           render(merged);
         })
@@ -356,6 +435,8 @@
       app_uptime_seconds: {{ metrics.app_uptime_seconds or 0 }},
       server_uptime_seconds: {{ metrics.server_uptime_seconds or 0 }},
       online_users: {{ online_users or 0 }},
+      online_admins: {{ online_admins | tojson }},
+      online_admin_error: {{ (online_admin_error or '') | tojson }},
       cpu_percent: {% if metrics.cpu_percent is not none %}{{ metrics.cpu_percent }}{% else %}null{% endif %},
       memory_total_bytes: {% if metrics.memory_total_bytes is not none %}{{ metrics.memory_total_bytes }}{% else %}null{% endif %},
       memory_used_bytes: {% if metrics.memory_used_bytes is not none %}{{ metrics.memory_used_bytes }}{% else %}null{% endif %},

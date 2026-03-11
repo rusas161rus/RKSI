@@ -199,6 +199,50 @@ body {
   border-radius: 8px;
   background: #161d29;
 }
+
+.monitor-admins-card {
+  margin-top: 0.8rem;
+}
+
+.monitor-admins-card__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.55rem;
+}
+
+.monitor-admins-card__head h3 {
+  margin: 0;
+}
+
+.monitor-admin-list {
+  list-style: none;
+  margin: 0.7rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.monitor-admin-list__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 0.5rem 0.62rem;
+  border: 1px solid color-mix(in srgb, var(--card-border) 84%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--card-bg) 92%, #0ea5e9 8%);
+}
+
+.monitor-admin-list__empty {
+  padding: 0.2rem 0.1rem;
+}
+
+.monitor-admin-name {
+  font-weight: 600;
+}
+
 .narrow { max-width: 420px; }
 
 .auth-shell {

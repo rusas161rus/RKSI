@@ -588,6 +588,28 @@ def count_online_users(window_minutes: int = ONLINE_USERS_WINDOW_MINUTES) -> int
     return int(row[0]) if row else 0
 
 
+def list_online_admins(window_minutes: int = ONLINE_USERS_WINDOW_MINUTES) -> list[dict]:
+    with get_main_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                    u.id,
+                    COALESCE(NULLIF(BTRIM(u.full_name), ''), u.username) AS display_name,
+                    u.username
+                FROM online_user_presence p
+                JOIN site_admins a ON a.user_id = p.user_id
+                JOIN site_users u ON u.id = p.user_id
+                WHERE p.last_seen >= now() - (%s * interval '1 minute')
+                  AND u.is_active = TRUE
+                ORDER BY p.last_seen DESC, u.id DESC
+                """,
+                (max(1, int(window_minutes)),),
+            )
+            rows = cur.fetchall()
+    return [{"id": row[0], "display_name": row[1], "username": row[2]} for row in rows]
+
+
 def _read_linux_cpu_totals() -> tuple[int, int] | None:
     try:
         with open("/proc/stat", "r", encoding="utf-8") as fh:
@@ -2364,17 +2386,25 @@ def admin_monitor():
     metrics = collect_monitor_payload()
     online_users = 0
     online_error = ""
+    online_admins = []
+    online_admin_error = ""
     try:
         online_users = count_online_users()
     except Exception as exc:
         online_error = str(exc)
+    try:
+        online_admins = list_online_admins()
+    except Exception as exc:
+        online_admin_error = str(exc)
     return render_template(
         "admin_monitor.html",
         title="Мониторинг",
         metrics=metrics,
         online_users=online_users,
+        online_admins=online_admins,
         online_window_minutes=ONLINE_USERS_WINDOW_MINUTES,
         online_error=online_error,
+        online_admin_error=online_admin_error,
     )
 
 
@@ -2384,17 +2414,25 @@ def admin_monitor_status():
     metrics = collect_monitor_payload()
     online_users = 0
     online_error = ""
+    online_admins = []
+    online_admin_error = ""
     try:
         online_users = count_online_users()
     except Exception as exc:
         online_error = str(exc)
+    try:
+        online_admins = list_online_admins()
+    except Exception as exc:
+        online_admin_error = str(exc)
     return jsonify(
         {
             "ok": True,
             "metrics": metrics,
             "online_users": online_users,
+            "online_admins": online_admins,
             "online_window_minutes": ONLINE_USERS_WINDOW_MINUTES,
             "online_error": online_error,
+            "online_admin_error": online_admin_error,
         }
     )
 
