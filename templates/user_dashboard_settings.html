@@ -14,7 +14,7 @@
   (function () {
     var widgetList = document.getElementById('dashboardWidgetList');
     var resetButton = document.getElementById('dashboardLayoutReset');
-    var storageKey = 'dashboard-layout-v2';
+    var storageKey = 'dashboard-layout-v2-user-' + {{ user_id | tojson }};
     var sizeOptions = ['quarter', 'third', 'half', 'full'];
     var widgets = {{ dashboard_widgets | tojson }};
 

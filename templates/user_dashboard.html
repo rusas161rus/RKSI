@@ -98,7 +98,7 @@
       <p class="meta">Пока пусто. Ниже в расписании можно добавлять преподавателей в избранное.</p>
     {% endif %}
   </section>
-  <section class="card dashboard-widget dashboard-widget--half" data-widget-id="announcements" data-widget-title="Объявления" data-default-size="half">
+  <section class="card dashboard-widget dashboard-widget--full" data-widget-id="announcements" data-widget-title="Объявления" data-default-size="full">
     <h3>Объявления</h3>
     {% if announcements %}
       <div class="mini-list">
@@ -203,7 +203,7 @@
       <p class="meta">Пока нет ни одной личной заметки.</p>
     {% endif %}
   </section>
-  <section class="card dashboard-widget dashboard-widget--full" data-widget-id="conflicts" data-widget-title="Расхождения источников" data-default-size="full">
+  <section class="card dashboard-widget dashboard-widget--half" data-widget-id="conflicts" data-widget-title="Расхождения источников" data-default-size="half">
   <h3>Расхождения источников</h3>
   {% if source_conflicts %}
     <div class="mini-list">
@@ -321,7 +321,8 @@
 <script>
   (function () {
     var layout = document.getElementById('dashboardLayout');
-    var storageKey = 'dashboard-layout-v2';
+    var configuredDefaults = {{ dashboard_widgets | tojson }};
+    var storageKey = 'dashboard-layout-v2-user-' + {{ user.id | tojson }};
     var sizeOptions = ['quarter', 'third', 'half', 'full'];
 
     if (!layout) {
@@ -335,13 +336,36 @@
 
     var widgetsById = {};
     var defaultState = { order: [], hidden: {}, sizes: {} };
+    var defaultsById = {};
+    var configuredOrder = [];
+    configuredDefaults.forEach(function (item) {
+      if (!item || !item.id) return;
+      defaultsById[item.id] = item;
+      configuredOrder.push(item.id);
+    });
+
     widgets.forEach(function (widget) {
       var id = widget.dataset.widgetId;
       if (!id) return;
       widgetsById[id] = widget;
-      defaultState.order.push(id);
       defaultState.hidden[id] = false;
-      defaultState.sizes[id] = sizeOptions.indexOf(widget.dataset.defaultSize) >= 0 ? widget.dataset.defaultSize : 'half';
+      var configuredSize = defaultsById[id] ? defaultsById[id].default_size : null;
+      var fallbackSize = widget.dataset.defaultSize;
+      var sizeCandidate = sizeOptions.indexOf(configuredSize) >= 0 ? configuredSize : fallbackSize;
+      defaultState.sizes[id] = sizeOptions.indexOf(sizeCandidate) >= 0 ? sizeCandidate : 'half';
+    });
+
+    configuredOrder.forEach(function (id) {
+      if (widgetsById[id]) {
+        defaultState.order.push(id);
+      }
+    });
+    widgets.forEach(function (widget) {
+      var id = widget.dataset.widgetId;
+      if (!id) return;
+      if (defaultState.order.indexOf(id) < 0) {
+        defaultState.order.push(id);
+      }
     });
 
     function cloneState(source) {

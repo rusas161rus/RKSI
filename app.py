@@ -61,14 +61,14 @@ AUTO_SCHEDULER_ENABLED = os.getenv("ENABLE_BACKGROUND_PARSER", "0").strip().lowe
 RKSI_SCHEDULE_URL = "https://www.rksi.ru/schedules"
 RKSI_MOBILE_SCHEDULE_URL = "https://www.rksi.ru/mobileschedule"
 DASHBOARD_WIDGETS = [
+    {"id": "announcements", "title": "Объявления", "default_size": "full"},
     {"id": "profile", "title": "Личный кабинет", "default_size": "half"},
     {"id": "telegram", "title": "Привязка Telegram", "default_size": "quarter"},
     {"id": "favorites", "title": "Избранные преподаватели", "default_size": "quarter"},
-    {"id": "announcements", "title": "Объявления", "default_size": "half"},
     {"id": "changes", "title": "Лента изменений", "default_size": "half"},
     {"id": "today", "title": "Сегодня", "default_size": "half"},
     {"id": "notes", "title": "Мои заметки и дедлайны", "default_size": "half"},
-    {"id": "conflicts", "title": "Расхождения источников", "default_size": "full"},
+    {"id": "conflicts", "title": "Расхождения источников", "default_size": "half"},
     {"id": "schedule", "title": "Расписание", "default_size": "full"},
 ]
 
@@ -688,6 +688,7 @@ def me_layout_settings():
         "user_dashboard_settings.html",
         title="Настройка кабинета",
         dashboard_widgets=DASHBOARD_WIDGETS,
+        user_id=session["user_id"],
     )
 
 
@@ -901,6 +902,7 @@ def me():
         "user_dashboard.html",
         title="Личный кабинет",
         user=user,
+        dashboard_widgets=DASHBOARD_WIDGETS,
         groups=groups,
         teachers=teachers,
         schedule_days=schedule_days,
