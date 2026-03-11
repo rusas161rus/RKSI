@@ -801,6 +801,17 @@ th, td {
   padding: 0.35rem 0.7rem;
 }
 
+.ai-study-inline {
+  display: inline-flex;
+  align-items: stretch;
+  gap: 0.45rem;
+}
+
+.ai-study-select {
+  min-width: 220px;
+  max-width: 320px;
+}
+
 .ai-pending-note {
   border: 1px solid color-mix(in srgb, var(--primary) 30%, var(--card-border));
   border-radius: 10px;
@@ -931,6 +942,15 @@ th, td {
 
   .ai-chat-form {
     grid-template-columns: 1fr;
+  }
+
+  .ai-study-inline {
+    width: 100%;
+  }
+
+  .ai-study-select {
+    flex: 1 1 auto;
+    max-width: none;
   }
 
   .note-card {

@@ -23,6 +23,7 @@ from llm_assistant import (
     extract_note_payload,
     extract_search_query,
     extract_study_subject,
+    fetch_group_subject_options,
     fetch_chat_messages,
     get_pending_note,
     fetch_schedule_context,
@@ -734,11 +735,13 @@ def ai_assistant_page():
     ai_messages = []
     ai_settings = {"allow_note_creation": False}
     pending_note = None
+    study_subjects: list[str] = []
     if llm_ready:
         chat_session_id = get_or_create_chat_session(user["id"])
         ai_messages = fetch_chat_messages(chat_session_id, limit=80)
         ai_settings = get_ai_user_settings(user["id"])
         pending_note = get_pending_note(user["id"])
+        study_subjects = fetch_group_subject_options(user["id"])
     else:
         flash("Сервис ИИ временно недоступен. Проверьте подключение к LLM_DB.", "error")
 
@@ -749,6 +752,7 @@ def ai_assistant_page():
         ai_messages=ai_messages,
         ai_settings=ai_settings,
         pending_note=pending_note,
+        study_subjects=study_subjects,
         llm_ready=llm_ready,
         llm_error=llm_error,
         ollama_model=(os.getenv("OLLAMA_MODEL") or "qwen2.5:7b-instruct").strip(),

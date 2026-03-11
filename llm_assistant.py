@@ -252,6 +252,43 @@ def _load_user_group(user_id: int) -> tuple[int | None, str | None]:
     return row[0], row[1]
 
 
+def fetch_group_subject_options(user_id: int, limit: int = 300) -> list[str]:
+    group_id, _ = _load_user_group(user_id)
+    if not group_id:
+        return []
+
+    with get_main_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT DISTINCT x.subject_name
+                FROM (
+                  SELECT subj.subject_name
+                  FROM schedule_entries s
+                  JOIN subjects subj ON subj.id = s.subject_id
+                  WHERE s.group_id = %s
+                  UNION
+                  SELECT subj.subject_name
+                  FROM parsed_schedule_entries p
+                  JOIN subjects subj ON subj.id = p.subject_id
+                  WHERE p.group_id = %s
+                  UNION
+                  SELECT subj.subject_name
+                  FROM parsed_tabletka_schedule_entries pt
+                  JOIN subjects subj ON subj.id = pt.subject_id
+                  WHERE pt.group_id = %s
+                ) x
+                WHERE x.subject_name IS NOT NULL
+                  AND btrim(x.subject_name) <> ''
+                ORDER BY x.subject_name
+                LIMIT %s
+                """,
+                (group_id, group_id, group_id, max(1, limit)),
+            )
+            rows = cur.fetchall()
+    return [row[0] for row in rows if (row[0] or "").strip()]
+
+
 def _format_time_range(start_time: Any, end_time: Any) -> str:
     if start_time and end_time:
         return f"{start_time.strftime('%H:%M')}-{end_time.strftime('%H:%M')}"
