@@ -702,6 +702,42 @@ th, td {
   flex: 0 1 auto;
 }
 
+.note-card {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.note-card__main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.note-card__actions {
+  flex: 0 0 auto;
+  margin-left: auto;
+  align-items: flex-start;
+  gap: 0.45rem;
+}
+
+.note-card__actions form {
+  margin: 0;
+}
+
+.note-card__actions .compact-form {
+  display: block;
+}
+
+.note-card__actions button {
+  width: auto;
+  min-height: 2rem;
+  padding: 0.28rem 0.62rem;
+  font-size: 0.9rem;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
 .warning-card {
   border-color: #d9b24c;
   background: color-mix(in srgb, #f4df9c 28%, var(--card-bg));
@@ -892,6 +928,16 @@ th, td {
 
   .ai-chat-form {
     grid-template-columns: 1fr;
+  }
+
+  .note-card {
+    flex-direction: column;
+  }
+
+  .note-card__actions {
+    margin-left: 0;
+    width: 100%;
+    justify-content: flex-start;
   }
 }
 

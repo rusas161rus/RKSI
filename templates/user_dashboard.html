@@ -177,13 +177,15 @@
     {% if notes %}
       <div class="mini-list">
         {% for note in notes %}
-        <article class="mini-list__item {% if note.is_done %}is-done{% endif %}">
-          <div class="mini-list__row">
-            <strong>{{ note.title }}</strong>
-            {% if note.due_date %}<span class="meta">до {{ note.due_date.strftime('%d.%m.%Y') }}</span>{% endif %}
+        <article class="mini-list__item note-card {% if note.is_done %}is-done{% endif %}">
+          <div class="note-card__main">
+            <div class="mini-list__row">
+              <strong>{{ note.title }}</strong>
+              {% if note.due_date %}<span class="meta">до {{ note.due_date.strftime('%d.%m.%Y') }}</span>{% endif %}
+            </div>
+            {% if note.note_text %}<p>{{ note.note_text }}</p>{% endif %}
           </div>
-          {% if note.note_text %}<p>{{ note.note_text }}</p>{% endif %}
-          <div class="action-row compact-actions">
+          <div class="action-row compact-actions note-card__actions">
             <form method="post" class="grid-form compact-form">
               {{ preserve_filters() }}
               <input type="hidden" name="profile_action" value="toggle_note_done" />
