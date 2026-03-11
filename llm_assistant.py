@@ -102,6 +102,27 @@ def _normalize_text(raw_text: str) -> str:
     return re.sub(r"\s+", " ", (raw_text or "").strip())
 
 
+def _normalize_message_text(raw_text: str) -> str:
+    text = (raw_text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not text:
+        return ""
+
+    cleaned_lines = [re.sub(r"[ \t]+", " ", line).strip() for line in text.split("\n")]
+    compact_lines: list[str] = []
+    last_was_blank = False
+    for line in cleaned_lines:
+        if not line:
+            if last_was_blank:
+                continue
+            compact_lines.append("")
+            last_was_blank = True
+        else:
+            compact_lines.append(line)
+            last_was_blank = False
+
+    return "\n".join(compact_lines).strip()
+
+
 def get_or_create_chat_session(user_id: int) -> int:
     with get_llm_conn() as conn:
         with conn.cursor() as cur:
@@ -148,7 +169,7 @@ def fetch_chat_messages(session_id: int, limit: int = 40) -> list[dict[str, Any]
 
 
 def save_chat_message(session_id: int, role: str, content: str, meta: dict[str, Any] | None = None) -> None:
-    cleaned = _normalize_text(content)
+    cleaned = _normalize_message_text(content)
     if not cleaned:
         return
     with get_llm_conn() as conn:
