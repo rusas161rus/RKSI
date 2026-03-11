@@ -8,7 +8,7 @@
 <input type="hidden" name="all_groups" value="{{ 1 if all_groups else 0 }}" />
 {%- endmacro %}
 {% block content %}
-<div class="profile-grid">
+<div class="profile-grid profile-grid--top">
   <section class="card">
     <h3>Личный кабинет</h3>
     <p><strong>Пользователь:</strong> {{ user.full_name or user.username }}</p>
@@ -100,7 +100,7 @@
   {% endif %}
 </section>
 
-<div class="dashboard-grid">
+<div class="dashboard-grid dashboard-grid--paired">
   <section class="card">
     <h3>Объявления</h3>
     {% if announcements %}
@@ -135,7 +135,7 @@
   </section>
 </div>
 
-<div class="dashboard-grid">
+<div class="dashboard-grid dashboard-grid--paired">
   <section class="card">
     <h3>Сегодня</h3>
     {% if today_summary.next_lesson %}
