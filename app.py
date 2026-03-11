@@ -726,7 +726,10 @@ def me():
                         sql += " AND COALESCE(x.teacher_name, '') = %s"
                     params.append(teacher_filter_name)
                 if keyword:
-                    sql += " AND (subject_name ILIKE %s OR COALESCE(room, '') ILIKE %s)"
+                    if source_mode == "rksi":
+                        sql += " AND (subj.subject_name ILIKE %s OR COALESCE(p.room, t.room, '') ILIKE %s)"
+                    else:
+                        sql += " AND (x.subject_name ILIKE %s OR COALESCE(x.room, '') ILIKE %s)"
                     like = f"%{keyword}%"
                     params.extend([like, like])
                 sql += " ORDER BY lesson_date, start_time NULLS LAST, end_time NULLS LAST, subject_name"
