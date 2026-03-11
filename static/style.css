@@ -719,21 +719,24 @@ th, td {
   margin-left: auto;
   align-items: flex-start;
   gap: 0.45rem;
+  justify-content: flex-end;
+  flex-wrap: nowrap;
 }
 
 .note-card__actions form {
   margin: 0;
+  flex: 0 0 auto;
 }
 
 .note-card__actions .compact-form {
   display: block;
 }
 
-.note-card__actions button {
+.note-card__actions .compact-form button {
   width: auto;
-  min-height: 2rem;
-  padding: 0.28rem 0.62rem;
-  font-size: 0.9rem;
+  min-height: 1.9rem;
+  padding: 0.22rem 0.6rem;
+  font-size: 0.86rem;
   line-height: 1.2;
   white-space: nowrap;
 }
@@ -938,6 +941,7 @@ th, td {
     margin-left: 0;
     width: 100%;
     justify-content: flex-start;
+    flex-wrap: wrap;
   }
 }
 
