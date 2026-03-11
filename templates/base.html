@@ -61,6 +61,7 @@
       var consentCookie = 'cookie_consent=accepted';
       var themeKey = 'site-theme';
       var scrollKey = 'restore-scroll-y';
+      var scrollParam = '_scroll_y';
       var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
       var consentGiven = document.cookie.split(';').some(function (item) {
         return item.trim() === consentCookie;
@@ -76,11 +77,28 @@
       }
 
       function bindScrollRestore() {
-        if (!storageEnabled) return;
+        var savedScroll = null;
+        if (storageEnabled) {
+          savedScroll = sessionStorage.getItem(scrollKey);
+          if (savedScroll !== null) {
+            sessionStorage.removeItem(scrollKey);
+          }
+        }
 
-        var savedScroll = sessionStorage.getItem(scrollKey);
+        if (savedScroll === null) {
+          var params = new URLSearchParams(window.location.search || '');
+          if (params.has(scrollParam)) {
+            savedScroll = params.get(scrollParam);
+            params.delete(scrollParam);
+            if (window.history && typeof window.history.replaceState === 'function') {
+              var nextQuery = params.toString();
+              var nextUrl = window.location.pathname + (nextQuery ? ('?' + nextQuery) : '') + window.location.hash;
+              window.history.replaceState(null, document.title, nextUrl);
+            }
+          }
+        }
+
         if (savedScroll !== null) {
-          sessionStorage.removeItem(scrollKey);
           window.requestAnimationFrame(function () {
             window.scrollTo({ top: parseInt(savedScroll, 10) || 0, behavior: 'auto' });
           });
@@ -90,7 +108,21 @@
           if (form.dataset.scrollBound === '1') return;
           form.dataset.scrollBound = '1';
           form.addEventListener('submit', function () {
-            sessionStorage.setItem(scrollKey, String(window.scrollY || window.pageYOffset || 0));
+            var currentY = String(window.scrollY || window.pageYOffset || 0);
+            if (storageEnabled) {
+              sessionStorage.setItem(scrollKey, currentY);
+            }
+            var method = (form.getAttribute('method') || 'get').toLowerCase();
+            if (method === 'get' && form.getAttribute('data-preserve-scroll') === '1') {
+              var scrollInput = form.querySelector('input[name="' + scrollParam + '"]');
+              if (!scrollInput) {
+                scrollInput = document.createElement('input');
+                scrollInput.type = 'hidden';
+                scrollInput.name = scrollParam;
+                form.appendChild(scrollInput);
+              }
+              scrollInput.value = currentY;
+            }
           });
         });
       }
@@ -109,6 +141,7 @@
       }
 
       applyTheme(theme);
+      bindScrollRestore();
 
       if (toggle) {
         toggle.addEventListener('click', function () {
