@@ -814,6 +814,32 @@ def _schedule_title(prefix: str, user: dict[str, Any]) -> str:
     return f"{prefix}\nГруппа: {user.get('group_name') or 'не выбрана'}"
 
 
+def _send_schedule_two_messages(
+    settings: dict[str, Any],
+    chat_id: int,
+    user: dict[str, Any],
+    title_prefix: str,
+    start_day: date,
+    end_day: date,
+) -> None:
+    rows = fetch_user_schedule(user.get("preferred_group_id"), start_day, end_day)
+    planshetka_rows = [row for row in rows if row["source"] == "planshetka"]
+    rksi_rows = [row for row in rows if row["source"] == "rksi"]
+
+    _send_telegram_message(
+        settings,
+        chat_id,
+        format_schedule_rows_for_bot(planshetka_rows, _schedule_title(f"{title_prefix} (Planshetka)", user)),
+        linked=True,
+    )
+    _send_telegram_message(
+        settings,
+        chat_id,
+        format_schedule_rows_for_bot(rksi_rows, _schedule_title(f"{title_prefix} (РКСИ)", user)),
+        linked=True,
+    )
+
+
 def _handle_linked_command(settings: dict[str, Any], chat_id: int, user: dict[str, Any], text: str) -> None:
     lowered = (text or "").strip().lower()
     if lowered in {"/start", "/help"}:
@@ -851,18 +877,15 @@ def _handle_linked_command(settings: dict[str, Any], chat_id: int, user: dict[st
         return
     if lowered == "сегодня":
         day = date.today()
-        rows = fetch_user_schedule(user["preferred_group_id"], day, day)
-        _send_telegram_message(settings, chat_id, format_schedule_rows_for_bot(rows, _schedule_title("Расписание на сегодня", user)), linked=True)
+        _send_schedule_two_messages(settings, chat_id, user, "Расписание на сегодня", day, day)
         return
     if lowered == "завтра":
         day = date.today() + timedelta(days=1)
-        rows = fetch_user_schedule(user["preferred_group_id"], day, day)
-        _send_telegram_message(settings, chat_id, format_schedule_rows_for_bot(rows, _schedule_title("Расписание на завтра", user)), linked=True)
+        _send_schedule_two_messages(settings, chat_id, user, "Расписание на завтра", day, day)
         return
     if lowered == "неделя":
         start_day = date.today() - timedelta(days=date.today().weekday())
-        rows = fetch_user_schedule(user["preferred_group_id"], start_day, start_day + timedelta(days=6))
-        _send_telegram_message(settings, chat_id, format_schedule_rows_for_bot(rows, _schedule_title("Расписание на неделю", user)), linked=True)
+        _send_schedule_two_messages(settings, chat_id, user, "Расписание на неделю", start_day, start_day + timedelta(days=6))
         return
     if lowered == "как привязать аккаунт":
         _send_unlinked_help(settings, chat_id)
