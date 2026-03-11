@@ -42,15 +42,23 @@
   <section id="cookieBanner" class="cookie-banner" hidden aria-live="polite" aria-label="Согласие на cookies">
     <div class="cookie-banner__card">
       <div>
-        <h2>Сбор cookies и данных браузера</h2>
-        <p>Сайт использует технические cookies, localStorage, sessionStorage и кэш браузера для входа в систему, сохранения темы и удобства работы с расписанием.</p>
-        <p><a href="{{ url_for('cookie_policy') }}">Открыть соглашение</a></p>
+        <h2>Технические cookies и кэш браузера</h2>
+        <p>Для авторизации и сохранения настроек сайт использует только технические cookies, localStorage, sessionStorage и кэш браузера.</p>
+        <p class="cookie-banner__links">
+          <a href="{{ url_for('cookie_policy') }}">Соглашение о cookies и кэше</a>
+          <a href="{{ url_for('free_use_license') }}">Лицензионное соглашение</a>
+        </p>
       </div>
       <div class="cookie-banner__actions">
         <button type="button" id="cookieAccept">Принять</button>
       </div>
     </div>
   </section>
+
+  <footer class="site-footer">
+    <a href="{{ url_for('cookie_policy') }}">Соглашение о cookies и кэше</a>
+    <a href="{{ url_for('free_use_license') }}">Лицензионное соглашение</a>
+  </footer>
 
   <script>
     (function () {

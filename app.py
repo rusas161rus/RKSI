@@ -1206,6 +1206,11 @@ def cookie_policy():
     return render_template("cookie_policy.html", title="Соглашение о cookies")
 
 
+@app.route("/free-use-license")
+def free_use_license():
+    return render_template("free_use_license.html", title="Лицензионное соглашение")
+
+
 @app.route("/me/settings")
 @login_required
 def me_layout_settings():
