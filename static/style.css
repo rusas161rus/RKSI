@@ -147,11 +147,6 @@ body {
 
 .grid-form label { display: flex; flex-direction: column; gap: 0.35rem; }
 .top-search-form { margin-top: 0.8rem; }
-.top-controls-form {
-  align-items: end;
-  grid-template-columns: minmax(220px, 1.15fr) minmax(220px, 1.15fr) auto auto auto;
-}
-
 input, select, button {
   border: 1px solid var(--input-border);
   border-radius: 8px;
@@ -355,7 +350,6 @@ th, td {
   .nav-link { width: auto; }
   .action-row form { flex-basis: 100%; }
   .day-column { padding: 0.62rem; }
-  .top-controls-form { grid-template-columns: 1fr; }
 }
 
 
@@ -565,6 +559,23 @@ th, td {
   margin-bottom: 1rem;
 }
 
+.profile-settings-form {
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
+  align-items: end;
+}
+
+.profile-settings-form__full {
+  grid-column: 1 / -1;
+}
+
+.profile-settings-form .action-row {
+  margin-top: 0.1rem;
+}
+
+.profile-settings-form .action-row button {
+  min-width: 180px;
+}
+
 .mini-list {
   display: grid;
   gap: 0.75rem;
@@ -655,5 +666,13 @@ th, td {
 
   .notes-form {
     grid-template-columns: 1fr;
+  }
+
+  .profile-settings-form {
+    grid-template-columns: 1fr;
+  }
+
+  .profile-settings-form__full {
+    grid-column: auto;
   }
 }

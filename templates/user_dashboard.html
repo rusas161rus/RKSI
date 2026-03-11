@@ -35,9 +35,14 @@
 
 <div class="profile-grid">
   <section class="card">
-    <h3>Профиль и фильтры</h3>
-    <form method="post" class="grid-form top-controls-form">
-      {{ preserve_filters() }}
+    <h3>Личный кабинет</h3>
+    <p><strong>Пользователь:</strong> {{ user.full_name or user.username }}</p>
+    {% if group_name %}<p class="meta">Основная группа: {{ group_name }}</p>{% else %}<p class="meta">Группа пока не выбрана.</p>{% endif %}
+    <form method="post" class="grid-form profile-settings-form">
+      <input type="hidden" name="date" value="{{ selected_date }}" />
+      <input type="hidden" name="period" value="{{ selected_period }}" />
+      <input type="hidden" name="q" value="{{ search_query }}" />
+      <input type="hidden" name="source" value="{{ source_mode }}" />
       <label>Моя учебная группа
         <select name="preferred_group_id">
           <option value="">Выберите группу</option>
@@ -56,15 +61,17 @@
         </select>
       </label>
 
-      <label class="inline-check"><input type="checkbox" name="all_groups" value="1" {% if all_groups %}checked{% endif %} /> Искать по всем группам</label>
+      <label class="inline-check profile-settings-form__full"><input type="checkbox" name="all_groups" value="1" {% if all_groups %}checked{% endif %} /> Искать по всем группам</label>
 
-      <button type="submit" name="profile_action" value="apply">Применить</button>
-      <button type="submit" name="profile_action" value="reset_search" class="danger">Сбросить поиск</button>
+      <div class="action-row profile-settings-form__full">
+        <button type="submit" name="profile_action" value="apply">Применить</button>
+        <button type="submit" name="profile_action" value="reset_search" class="danger">Сбросить поиск</button>
+      </div>
     </form>
   </section>
 
   <section class="card">
-    <h3>Telegram-бот</h3>
+    <h3>Привязка Telegram</h3>
     <p class="meta">{% if user.telegram_chat_id %}Аккаунт привязан к chat id {{ user.telegram_chat_id }}.{% else %}Привяжите Telegram, чтобы получить доступ к боту и уведомлениям.{% endif %}</p>
     {% if telegram_bot_url %}<p><a href="{{ telegram_bot_url }}" target="_blank" rel="noopener noreferrer">Открыть бота</a></p>{% endif %}
     {% if user.telegram_link_code and telegram_link_code_active %}
@@ -94,33 +101,6 @@
 
 <div class="dashboard-grid">
   <section class="card">
-    <h3>Сегодня</h3>
-    {% if today_summary.next_lesson %}
-      <p><strong>Следующая пара:</strong> {{ today_summary.next_lesson.subject_name }}</p>
-      <p class="meta">
-        {% if today_summary.next_lesson.start_time and today_summary.next_lesson.end_time %}
-          {{ today_summary.next_lesson.start_time.strftime('%H:%M') }} - {{ today_summary.next_lesson.end_time.strftime('%H:%M') }}
-        {% else %}
-          Время не указано
-        {% endif %}
-        {% if today_summary.next_lesson.room %}, ауд. {{ today_summary.next_lesson.room }}{% endif %}
-      </p>
-    {% else %}
-      <p>Следующих занятий на сегодня нет.</p>
-    {% endif %}
-    {% if today_summary.rows %}
-      <div class="mini-list">
-        {% for row in today_summary.rows %}
-        <article class="mini-list__item">
-          <strong>{{ row.subject_name }}</strong>
-          <span class="meta">{% if row.start_time %}{{ row.start_time.strftime('%H:%M') }}{% else %}без времени{% endif %} · {{ row.source }}</span>
-        </article>
-        {% endfor %}
-      </div>
-    {% endif %}
-  </section>
-
-  <section class="card">
     <h3>Избранные преподаватели</h3>
     {% if favorite_teachers %}
       <div class="chip-list">
@@ -146,6 +126,35 @@
     {% endif %}
   </section>
 
+  <section class="card">
+    <h3>Сегодня</h3>
+    {% if today_summary.next_lesson %}
+      <p><strong>Следующая пара:</strong> {{ today_summary.next_lesson.subject_name }}</p>
+      <p class="meta">
+        {% if today_summary.next_lesson.start_time and today_summary.next_lesson.end_time %}
+          {{ today_summary.next_lesson.start_time.strftime('%H:%M') }} - {{ today_summary.next_lesson.end_time.strftime('%H:%M') }}
+        {% else %}
+          Время не указано
+        {% endif %}
+        {% if today_summary.next_lesson.room %}, ауд. {{ today_summary.next_lesson.room }}{% endif %}
+      </p>
+    {% else %}
+      <p>Следующих занятий на сегодня нет.</p>
+    {% endif %}
+    {% if today_summary.rows %}
+      <div class="mini-list">
+        {% for row in today_summary.rows %}
+        <article class="mini-list__item">
+          <strong>{{ row.subject_name }}</strong>
+          <span class="meta">{% if row.start_time %}{{ row.start_time.strftime('%H:%M') }}{% else %}без времени{% endif %} · {{ row.source }}</span>
+        </article>
+        {% endfor %}
+      </div>
+    {% endif %}
+  </section>
+</div>
+
+<div class="dashboard-grid">
   <section class="card">
     <h3>Объявления</h3>
     {% if announcements %}

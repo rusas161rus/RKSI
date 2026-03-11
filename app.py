@@ -788,10 +788,23 @@ def me():
             """)
             teachers = [row for row in cur.fetchall() if not is_composite_teacher_name(row[1])]
             teacher_filter_name = None
+            selected_teacher_id = teacher_filter
             if teacher_filter_id is not None:
                 cur.execute("SELECT full_name FROM teachers WHERE id = %s", (teacher_filter_id,))
                 row = cur.fetchone()
                 teacher_filter_name = row[0] if row else None
+                if teacher_filter_name:
+                    cur.execute(
+                        """
+                        SELECT MIN(id)
+                        FROM teachers
+                        WHERE full_name = %s
+                        """,
+                        (teacher_filter_name,),
+                    )
+                    canonical_row = cur.fetchone()
+                    if canonical_row and canonical_row[0]:
+                        selected_teacher_id = str(canonical_row[0])
             group_name = None
             if user["preferred_group_id"]:
                 cur.execute("SELECT group_name FROM study_groups WHERE id = %s", (user["preferred_group_id"],))
@@ -833,7 +846,7 @@ def me():
                     params.append(user["preferred_group_id"])
                 if teacher_filter_name:
                     if source_mode == "rksi":
-                        sql += " AND COALESCE(t.full_name, '') = %s"
+                        sql += " AND COALESCE(t.full_name, p.raw_teacher_name, '') = %s"
                     else:
                         sql += " AND COALESCE(x.teacher_name, '') = %s"
                     params.append(teacher_filter_name)
@@ -875,7 +888,7 @@ def me():
         period_options=PERIOD_OPTIONS,
         search_query=keyword,
         group_name=group_name,
-        selected_teacher_id=teacher_filter,
+        selected_teacher_id=selected_teacher_id,
         all_groups=all_groups,
         show_schedule=show_schedule,
         source_mode=source_mode,
