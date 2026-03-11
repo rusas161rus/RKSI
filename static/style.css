@@ -703,6 +703,16 @@ th, td {
   margin: 0;
 }
 
+.favorite-inline-form--under-title {
+  margin: 0.32rem 0 0.5rem;
+}
+
+.favorite-inline-form--under-title .linkish-button {
+  display: inline-flex;
+  width: auto;
+  max-width: 100%;
+}
+
 @media (max-width: 1280px) {
   .dictionary-grid {
     grid-template-columns: 1fr;

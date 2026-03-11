@@ -299,17 +299,15 @@
             {% for row in day.rows %}
             <article class="lesson-block">
               {% if row[7] != 'planshetka' %}<p class="lesson-time">{% if row[2] and row[3] %}{{ row[2] }} — {{ row[3] }}{% else %}без времени{% endif %}</p>{% endif %}
-              <div class="lesson-block__head">
-                <h4>{{ row[4] }}</h4>
-                {% if row[8] %}
-                <form method="post" class="favorite-inline-form">
-                  {{ preserve_filters() }}
-                  <input type="hidden" name="profile_action" value="toggle_favorite_teacher" />
-                  <input type="hidden" name="favorite_teacher_id" value="{{ row[8] }}" />
-                  <button type="submit" class="linkish-button">{% if row[8] in favorite_teacher_ids %}Убрать из избранного{% else %}В избранное{% endif %}</button>
-                </form>
-                {% endif %}
-              </div>
+              <h4>{{ row[4] }}</h4>
+              {% if row[8] %}
+              <form method="post" class="favorite-inline-form favorite-inline-form--under-title">
+                {{ preserve_filters() }}
+                <input type="hidden" name="profile_action" value="toggle_favorite_teacher" />
+                <input type="hidden" name="favorite_teacher_id" value="{{ row[8] }}" />
+                <button type="submit" class="linkish-button">{% if row[8] in favorite_teacher_ids %}Убрать из избранного{% else %}В избранное{% endif %}</button>
+              </form>
+              {% endif %}
               <p class="lesson-detail">{{ row[5] or "" }}{% if row[6] %}, ауд. {{ row[6] }}{% endif %}</p>
               {% if all_groups %}<p class="lesson-detail">Группа: {{ row[9] }}</p>{% endif %}
               <small class="source">Источник: {{ "сайт РКСИ" if row[7] == "rksi" else ("Planshetka" if row[7] == "planshetka" else "ручное расписание") }}</small>
