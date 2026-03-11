@@ -74,60 +74,31 @@
   </section>
 </div>
 
-<div class="dashboard-grid">
-  <section class="card">
-    <h3>Избранные преподаватели</h3>
-    {% if favorite_teachers %}
-      <div class="chip-list">
-        {% for teacher in favorite_teachers %}
-        <form method="get" class="chip-form">
-          <input type="hidden" name="date" value="{{ selected_date }}" />
-          <input type="hidden" name="period" value="{{ selected_period }}" />
-          <input type="hidden" name="q" value="{{ search_query }}" />
-          <input type="hidden" name="source" value="{{ source_mode }}" />
-          <input type="hidden" name="all_groups" value="{{ 1 if all_groups else 0 }}" />
-          <button type="submit" name="teacher_id" value="{{ teacher.id }}" class="chip-button">{{ teacher.full_name }}</button>
-        </form>
-        <form method="post" class="chip-form chip-form--remove">
-          {{ preserve_filters() }}
-          <input type="hidden" name="profile_action" value="toggle_favorite_teacher" />
-          <input type="hidden" name="favorite_teacher_id" value="{{ teacher.id }}" />
-          <button type="submit" class="danger">Убрать</button>
-        </form>
-        {% endfor %}
-      </div>
-    {% else %}
-      <p class="meta">Пока пусто. Ниже в расписании можно добавлять преподавателей в избранное.</p>
-    {% endif %}
-  </section>
-
-  <section class="card">
-    <h3>Сегодня</h3>
-    {% if today_summary.next_lesson %}
-      <p><strong>Следующая пара:</strong> {{ today_summary.next_lesson.subject_name }}</p>
-      <p class="meta">
-        {% if today_summary.next_lesson.start_time and today_summary.next_lesson.end_time %}
-          {{ today_summary.next_lesson.start_time.strftime('%H:%M') }} - {{ today_summary.next_lesson.end_time.strftime('%H:%M') }}
-        {% else %}
-          Время не указано
-        {% endif %}
-        {% if today_summary.next_lesson.room %}, ауд. {{ today_summary.next_lesson.room }}{% endif %}
-      </p>
-    {% else %}
-      <p>Следующих занятий на сегодня нет.</p>
-    {% endif %}
-    {% if today_summary.rows %}
-      <div class="mini-list">
-        {% for row in today_summary.rows %}
-        <article class="mini-list__item">
-          <strong>{{ row.subject_name }}</strong>
-          <span class="meta">{% if row.start_time %}{{ row.start_time.strftime('%H:%M') }}{% else %}без времени{% endif %} · {{ row.source }}</span>
-        </article>
-        {% endfor %}
-      </div>
-    {% endif %}
-  </section>
-</div>
+<section class="card">
+  <h3>Избранные преподаватели</h3>
+  {% if favorite_teachers %}
+    <div class="chip-list">
+      {% for teacher in favorite_teachers %}
+      <form method="get" class="chip-form">
+        <input type="hidden" name="date" value="{{ selected_date }}" />
+        <input type="hidden" name="period" value="{{ selected_period }}" />
+        <input type="hidden" name="q" value="{{ search_query }}" />
+        <input type="hidden" name="source" value="{{ source_mode }}" />
+        <input type="hidden" name="all_groups" value="{{ 1 if all_groups else 0 }}" />
+        <button type="submit" name="teacher_id" value="{{ teacher.id }}" class="chip-button">{{ teacher.full_name }}</button>
+      </form>
+      <form method="post" class="chip-form chip-form--remove">
+        {{ preserve_filters() }}
+        <input type="hidden" name="profile_action" value="toggle_favorite_teacher" />
+        <input type="hidden" name="favorite_teacher_id" value="{{ teacher.id }}" />
+        <button type="submit" class="danger">Убрать</button>
+      </form>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="meta">Пока пусто. Ниже в расписании можно добавлять преподавателей в избранное.</p>
+  {% endif %}
+</section>
 
 <div class="dashboard-grid">
   <section class="card">
@@ -165,6 +136,33 @@
 </div>
 
 <div class="dashboard-grid">
+  <section class="card">
+    <h3>Сегодня</h3>
+    {% if today_summary.next_lesson %}
+      <p><strong>Следующая пара:</strong> {{ today_summary.next_lesson.subject_name }}</p>
+      <p class="meta">
+        {% if today_summary.next_lesson.start_time and today_summary.next_lesson.end_time %}
+          {{ today_summary.next_lesson.start_time.strftime('%H:%M') }} - {{ today_summary.next_lesson.end_time.strftime('%H:%M') }}
+        {% else %}
+          Время не указано
+        {% endif %}
+        {% if today_summary.next_lesson.room %}, ауд. {{ today_summary.next_lesson.room }}{% endif %}
+      </p>
+    {% else %}
+      <p>Следующих занятий на сегодня нет.</p>
+    {% endif %}
+    {% if today_summary.rows %}
+      <div class="mini-list">
+        {% for row in today_summary.rows %}
+        <article class="mini-list__item">
+          <strong>{{ row.subject_name }}</strong>
+          <span class="meta">{% if row.start_time %}{{ row.start_time.strftime('%H:%M') }}{% else %}без времени{% endif %} · {{ row.source }}</span>
+        </article>
+        {% endfor %}
+      </div>
+    {% endif %}
+  </section>
+
   <section class="card">
     <h3>Мои заметки и дедлайны</h3>
     <form method="post" class="grid-form notes-form">
@@ -212,35 +210,36 @@
     {% endif %}
   </section>
 
-  <section class="card">
-    <div class="action-row schedule-links" style="margin-bottom: 0.8rem;">
-      <form method="get" action="{{ planshetka_folder_url }}" target="_blank" rel="noopener noreferrer" class="grid-form compact-form">
-        <button type="submit" {% if not planshetka_folder_url %}disabled{% endif %}>Открыть папку Planshetka</button>
-      </form>
-      <form method="get" action="{{ rksi_schedule_url }}" target="_blank" rel="noopener noreferrer" class="grid-form compact-form">
-        <button type="submit">Открыть расписание РКСИ</button>
-      </form>
-      <form method="get" action="{{ rksi_mobile_schedule_url }}" target="_blank" rel="noopener noreferrer" class="grid-form compact-form">
-        <button type="submit">Открыть мобильную версию РКСИ</button>
-      </form>
-    </div>
-
-    <h3>Расхождения источников</h3>
-    {% if source_conflicts %}
-      <div class="mini-list">
-        {% for conflict in source_conflicts %}
-        <article class="mini-list__item warning-card">
-          <strong>{{ conflict.lesson_date.strftime('%d.%m.%Y') }} {% if conflict.start_time %}{{ conflict.start_time.strftime('%H:%M') }}{% endif %}</strong>
-          <p>РКСИ: {{ conflict.rksi_subject }}{% if conflict.rksi_teacher %}, {{ conflict.rksi_teacher }}{% endif %}{% if conflict.rksi_room %}, ауд. {{ conflict.rksi_room }}{% endif %}</p>
-          <p>Planshetka: {{ conflict.planshetka_subject }}{% if conflict.planshetka_teacher %}, {{ conflict.planshetka_teacher }}{% endif %}{% if conflict.planshetka_room %}, ауд. {{ conflict.planshetka_room }}{% endif %}</p>
-        </article>
-        {% endfor %}
-      </div>
-    {% else %}
-      <p class="meta">Явных расхождений между РКСИ и Planshetka на выбранный период не найдено.</p>
-    {% endif %}
-  </section>
 </div>
+
+<section class="card">
+  <div class="action-row schedule-links" style="margin-bottom: 0.8rem;">
+    <form method="get" action="{{ planshetka_folder_url }}" target="_blank" rel="noopener noreferrer" class="grid-form compact-form">
+      <button type="submit" {% if not planshetka_folder_url %}disabled{% endif %}>Открыть папку Planshetka</button>
+    </form>
+    <form method="get" action="{{ rksi_schedule_url }}" target="_blank" rel="noopener noreferrer" class="grid-form compact-form">
+      <button type="submit">Открыть расписание РКСИ</button>
+    </form>
+    <form method="get" action="{{ rksi_mobile_schedule_url }}" target="_blank" rel="noopener noreferrer" class="grid-form compact-form">
+      <button type="submit">Открыть мобильную версию РКСИ</button>
+    </form>
+  </div>
+
+  <h3>Расхождения источников</h3>
+  {% if source_conflicts %}
+    <div class="mini-list">
+      {% for conflict in source_conflicts %}
+      <article class="mini-list__item warning-card">
+        <strong>{{ conflict.lesson_date.strftime('%d.%m.%Y') }} {% if conflict.start_time %}{{ conflict.start_time.strftime('%H:%M') }}{% endif %}</strong>
+        <p>РКСИ: {{ conflict.rksi_subject }}{% if conflict.rksi_teacher %}, {{ conflict.rksi_teacher }}{% endif %}{% if conflict.rksi_room %}, ауд. {{ conflict.rksi_room }}{% endif %}</p>
+        <p>Planshetka: {{ conflict.planshetka_subject }}{% if conflict.planshetka_teacher %}, {{ conflict.planshetka_teacher }}{% endif %}{% if conflict.planshetka_room %}, ауд. {{ conflict.planshetka_room }}{% endif %}</p>
+      </article>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="meta">Явных расхождений между РКСИ и Planshetka на выбранный период не найдено.</p>
+  {% endif %}
+</section>
 
 <section class="card">
   <h2>Расписание</h2>
