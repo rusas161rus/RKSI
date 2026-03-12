@@ -137,6 +137,16 @@ def ensure_bot_tables() -> None:
                 )
                 """
             )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS telegram_outbound_dedup (
+                    chat_id BIGINT NOT NULL,
+                    message_hash VARCHAR(64) NOT NULL,
+                    sent_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    PRIMARY KEY (chat_id, message_hash)
+                )
+                """
+            )
 
 
 def load_telegram_settings() -> dict[str, Any]:
@@ -790,9 +800,38 @@ def _build_reply_keyboard(linked: bool) -> dict[str, Any]:
     return {"keyboard": [[{"text": "Сегодня"}, {"text": "Завтра"}], [{"text": "Неделя"}, {"text": "Изменения"}], [{"text": "Личный кабинет"}]], "resize_keyboard": True}
 
 
+def _claim_outbound_message(chat_id: int, text: str, linked: bool, window_seconds: int = 180) -> bool:
+    ensure_bot_tables()
+    normalized_text = (text or "").strip()[:4096]
+    message_hash = hashlib.sha256(f"{int(linked)}|{normalized_text}".encode("utf-8")).hexdigest()
+    with get_bot_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM telegram_outbound_dedup WHERE sent_at < now() - interval '1 day'")
+            cur.execute("SELECT sent_at FROM telegram_outbound_dedup WHERE chat_id = %s AND message_hash = %s", (chat_id, message_hash))
+            row = cur.fetchone()
+            if row and row[0]:
+                sent_at = row[0]
+                threshold = datetime.now(sent_at.tzinfo) - timedelta(seconds=window_seconds)
+                if sent_at >= threshold:
+                    return False
+            cur.execute(
+                """
+                INSERT INTO telegram_outbound_dedup(chat_id, message_hash, sent_at)
+                VALUES (%s, %s, now())
+                ON CONFLICT (chat_id, message_hash)
+                DO UPDATE SET sent_at = EXCLUDED.sent_at
+                """,
+                (chat_id, message_hash),
+            )
+    return True
+
+
 def _send_telegram_message(settings: dict[str, Any], chat_id: int, text: str, linked: bool = True, append_site_links: bool = False) -> None:
     if append_site_links:
         text = f"{text}{_build_site_links_text(settings)}"
+    if not _claim_outbound_message(chat_id, text, linked):
+        print(f"[personalization] duplicate outbound message skipped for chat {chat_id}")
+        return
     payload: dict[str, Any] = {
         "chat_id": chat_id,
         "text": text[:4096],
