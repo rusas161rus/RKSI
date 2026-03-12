@@ -1147,8 +1147,15 @@ def telegram_polling_worker() -> None:
             if not payload.get("ok"):
                 raise RuntimeError(payload.get("description") or "Telegram getUpdates failed")
             for update in payload.get("result", []):
-                process_telegram_update(settings, update)
-                update_last_telegram_update_id(int(update["update_id"]))
+                update_id = int(update["update_id"])
+                try:
+                    process_telegram_update(settings, update)
+                except Exception as exc:
+                    # Advance the offset even if replying to this update failed,
+                    # otherwise the same incoming message gets processed forever.
+                    print(f"[personalization] telegram update {update_id} failed: {exc}")
+                finally:
+                    update_last_telegram_update_id(update_id)
             time.sleep(1)
 
     _service_lock_loop(TELEGRAM_POLL_LOCK_ID, worker)
