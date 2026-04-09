@@ -1,3 +1,4 @@
+import os
 import hashlib
 import secrets
 import time
@@ -18,6 +19,15 @@ TELEGRAM_POLL_LOCK_ID = 812341
 TELEGRAM_NOTIFY_LOCK_ID = 812342
 LESSON_REMINDER_WINDOW_MINUTES = 15
 LESSON_SOURCE_PRIORITY = {"rksi": 0, "planshetka": 1, "manual": 2}
+
+
+def _telegram_request(method: str, url: str, *, timeout: int, params: dict[str, Any] | None = None, payload: dict[str, Any] | None = None) -> requests.Response:
+    proxy_url = (os.getenv("TELEGRAM_PROXY_URL") or "").strip()
+    proxies = {"http": proxy_url, "https": proxy_url} if proxy_url else None
+    with requests.Session() as session:
+        # Keep Telegram routing isolated from process-wide proxy env vars.
+        session.trust_env = False
+        return session.request(method=method, url=url, params=params, json=payload, timeout=timeout, proxies=proxies)
 
 
 def ensure_personalization_tables() -> None:
@@ -773,7 +783,12 @@ def format_schedule_rows_for_bot(rows: list[dict[str, Any]], title: str) -> str:
 
 
 def _telegram_api(settings: dict[str, Any], method: str, payload: dict[str, Any], timeout: int = 30) -> dict[str, Any]:
-    response = requests.post(f"https://api.telegram.org/bot{settings['bot_token']}/{method}", json=payload, timeout=timeout)
+    response = _telegram_request(
+        "POST",
+        f"https://api.telegram.org/bot{settings['bot_token']}/{method}",
+        payload=payload,
+        timeout=timeout,
+    )
     response.raise_for_status()
     data = response.json()
     if not data.get("ok"):
@@ -1180,7 +1195,12 @@ def telegram_polling_worker() -> None:
             params = {"timeout": 20}
             if settings.get("last_update_id") is not None:
                 params["offset"] = int(settings["last_update_id"]) + 1
-            response = requests.get(f"https://api.telegram.org/bot{settings['bot_token']}/getUpdates", params=params, timeout=30)
+            response = _telegram_request(
+                "GET",
+                f"https://api.telegram.org/bot{settings['bot_token']}/getUpdates",
+                params=params,
+                timeout=30,
+            )
             response.raise_for_status()
             payload = response.json()
             if not payload.get("ok"):
